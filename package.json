@@ -4,7 +4,6 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "api": "node server/elevenlabs-server.mjs",
     "dev": "vite --port 5173 --strictPort",
     "dev:api": "npm --prefix server run dev",
     "start:api": "npm --prefix server start",
