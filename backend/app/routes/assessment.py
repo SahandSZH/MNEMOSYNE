@@ -27,7 +27,7 @@ def create_assessment(
     payload: AssessmentCreate,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(
-        require_roles("doctor", "patient", "caregiver")
+        require_roles("doctor", "patient")
     ),
 ) -> Assessment:
     patient = db.scalar(select(Patient).where(Patient.id == payload.patient_id))
@@ -48,20 +48,16 @@ def create_assessment(
         patient_id=payload.patient_id,
         date=payload.date or dt_date.today(),
         recall_score=payload.recall_score,
-        clock_score=payload.clock_score,
+        drawing_score=payload.drawing_score,
         fluency_score=payload.fluency_score,
-        faq_score=payload.faq_score,
-        behavior_score=payload.behavior_score,
     )
     db.add(assessment)
     db.flush()
 
     report_data = gemini_service.generate_assessment_report(
         recall_score=payload.recall_score,
-        clock_score=payload.clock_score,
+        drawing_score=payload.drawing_score,
         fluency_score=payload.fluency_score,
-        faq_score=payload.faq_score,
-        behavior_score=payload.behavior_score,
     )
 
     db.add(
@@ -77,6 +73,7 @@ def create_assessment(
         select(Assessment)
         .options(
             selectinload(Assessment.speech_metrics),
+            selectinload(Assessment.facial_metrics),
             selectinload(Assessment.ai_report),
         )
         .where(Assessment.id == assessment.id)

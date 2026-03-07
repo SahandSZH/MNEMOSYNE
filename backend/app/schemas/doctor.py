@@ -6,10 +6,8 @@ from app.schemas.patient import PatientRead
 
 class TrendSummary(BaseModel):
     recall_avg: float
-    clock_avg: float
+    drawing_avg: float
     fluency_avg: float
-    faq_avg: float
-    behavior_avg: float
 
 
 class DoctorDashboardResponse(BaseModel):

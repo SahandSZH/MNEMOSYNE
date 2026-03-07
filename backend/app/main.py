@@ -4,9 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import Auth0Middleware
 from app.config import settings
 from app.database import Base, engine
-from app.models import AIReport, Assessment, Patient, SpeechMetric  # noqa: F401
+from app.models import AIReport, Assessment, FacialMetric, Patient, SpeechMetric  # noqa: F401
 from app.routes.assessment import router as assessment_router
 from app.routes.doctor import router as doctor_router
+from app.routes.facial import router as facial_router
 from app.routes.patient import router as patient_router
 from app.routes.speech import router as speech_router
 
@@ -40,5 +41,6 @@ def health_check() -> dict[str, str]:
 
 app.include_router(assessment_router)
 app.include_router(speech_router)
+app.include_router(facial_router)
 app.include_router(patient_router)
 app.include_router(doctor_router)

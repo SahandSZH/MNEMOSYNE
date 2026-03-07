@@ -45,6 +45,7 @@ def get_doctor_dashboard(
         select(Patient)
         .options(
             selectinload(Patient.assessments).selectinload(Assessment.speech_metrics),
+            selectinload(Patient.assessments).selectinload(Assessment.facial_metrics),
             selectinload(Patient.assessments).selectinload(Assessment.ai_report),
         )
         .where(Patient.id == patient_id, Patient.doctor_id == doctor_id)
@@ -59,10 +60,8 @@ def get_doctor_dashboard(
 
     trend = TrendSummary(
         recall_avg=_safe_average([item.recall_score for item in patient.assessments]),
-        clock_avg=_safe_average([item.clock_score for item in patient.assessments]),
+        drawing_avg=_safe_average([item.drawing_score for item in patient.assessments]),
         fluency_avg=_safe_average([item.fluency_score for item in patient.assessments]),
-        faq_avg=_safe_average([item.faq_score for item in patient.assessments]),
-        behavior_avg=_safe_average([item.behavior_score for item in patient.assessments]),
     )
 
     latest_report = None

@@ -25,6 +25,9 @@ class Settings(BaseSettings):
 
     elevenlabs_api_key: str = ""
     gemini_api_key: str = ""
+    presage_api_key: str = ""
+    presage_api_url: str = "https://api.presage.example.com/v1/behavioral-risk"
+    presage_timeout_seconds: float = 10.0
 
 
 @lru_cache

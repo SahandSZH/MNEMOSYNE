@@ -19,13 +19,14 @@ def get_patient_with_assessments(
     id: int,
     db: Session = Depends(get_db),
     current_user: dict[str, Any] = Depends(
-        require_roles("doctor", "patient", "caregiver")
+        require_roles("doctor", "patient")
     ),
 ) -> Patient:
     patient = db.scalar(
         select(Patient)
         .options(
             selectinload(Patient.assessments).selectinload(Assessment.speech_metrics),
+            selectinload(Patient.assessments).selectinload(Assessment.facial_metrics),
             selectinload(Patient.assessments).selectinload(Assessment.ai_report),
         )
         .where(Patient.id == id)

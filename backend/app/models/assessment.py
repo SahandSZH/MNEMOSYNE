@@ -8,6 +8,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.ai_report import AIReport
+    from app.models.facial_metric import FacialMetric
     from app.models.patient import Patient
     from app.models.speech_metric import SpeechMetric
 
@@ -23,13 +24,16 @@ class Assessment(Base):
     )
     date: Mapped[dt_date] = mapped_column(Date, default=dt_date.today)
     recall_score: Mapped[int] = mapped_column(Integer, nullable=False)
-    clock_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    drawing_score: Mapped[int] = mapped_column(Integer, nullable=False)
     fluency_score: Mapped[int] = mapped_column(Integer, nullable=False)
-    faq_score: Mapped[int] = mapped_column(Integer, nullable=False)
-    behavior_score: Mapped[int] = mapped_column(Integer, nullable=False)
 
     patient: Mapped["Patient"] = relationship(back_populates="assessments")
     speech_metrics: Mapped["SpeechMetric"] = relationship(
+        back_populates="assessment",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    facial_metrics: Mapped["FacialMetric"] = relationship(
         back_populates="assessment",
         uselist=False,
         cascade="all, delete-orphan",
