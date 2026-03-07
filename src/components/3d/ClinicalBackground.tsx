@@ -18,9 +18,9 @@ const ECGBackgroundLine = ({
 
   const points = useMemo(() => {
     const pts: THREE.Vector3[] = [];
-    const segments = 60;
-    for (let i = 0; i < segments; i++) {
-      const x = (i / segments) * width - width / 2;
+    const segs = 60;
+    for (let i = 0; i < segs; i++) {
+      const x = (i / segs) * width - width / 2;
       const t = (i % 15) / 15;
       let y = 0;
       if (t < 0.15) y = Math.sin(t / 0.15 * Math.PI) * 0.03;

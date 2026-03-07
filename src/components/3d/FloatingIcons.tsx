@@ -133,7 +133,6 @@ const PillCapsule = ({ position }: { position: [number, number, number] }) => {
 
 /* ─── Heart Pulse / ECG Waveform Ribbon ─── */
 const HeartPulseRibbon = ({ position }: { position: [number, number, number] }) => {
-  const ref = useRef<THREE.Line>(null);
   const groupRef = useRef<THREE.Group>(null);
 
   const points = useMemo(() => {
