@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Brain, Menu, X } from "lucide-react";
+import { useAuth0 } from "@auth0/auth0-react";
+import { Brain, LogOut, Menu, X } from "lucide-react";
 
 const navItems = [
   { label: "Dashboard", href: "#dashboard" },
@@ -11,6 +12,13 @@ const navItems = [
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const { isLoading, isAuthenticated, user, loginWithRedirect, logout } = useAuth0();
+
+  const handleLogin = () => loginWithRedirect();
+  const handleSignup = () =>
+    loginWithRedirect({ authorizationParams: { screen_hint: "signup" } });
+  const handleLogout = () =>
+    logout({ logoutParams: { returnTo: window.location.origin } });
 
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-border/50 bg-background/70 backdrop-blur-xl">
@@ -25,18 +33,55 @@ const Navbar = () => {
           MNEMOSYNE CARE
         </a>
 
-        <ul className="hidden items-center gap-1 md:flex">
-          {navItems.map((item) => (
-            <li key={item.label}>
-              <a
-                href={item.href}
-                className="rounded-md px-3 py-2 text-sm font-body text-foreground/85 transition-colors hover:bg-secondary hover:text-foreground"
+        <div className="hidden items-center md:flex">
+          <ul className="flex items-center gap-1">
+            {navItems.map((item) => (
+              <li key={item.label}>
+                <a
+                  href={item.href}
+                  className="rounded-md px-3 py-2 text-sm font-body text-foreground/85 transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+
+          {!isAuthenticated ? (
+            <div className="ml-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleLogin}
+                disabled={isLoading}
+                className="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {item.label}
-              </a>
-            </li>
-          ))}
-        </ul>
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={handleSignup}
+                disabled={isLoading}
+                className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Sign Up
+              </button>
+            </div>
+          ) : (
+            <div className="ml-4 flex items-center gap-2">
+              <span className="max-w-44 truncate rounded-md border border-border/70 bg-card/70 px-3 py-2 text-xs text-muted-foreground">
+                {user?.email || user?.name}
+              </span>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+              >
+                <LogOut className="h-4 w-4" />
+                Logout
+              </button>
+            </div>
+          )}
+        </div>
 
         <button
           type="button"
@@ -68,6 +113,49 @@ const Navbar = () => {
                 </a>
               </li>
             ))}
+
+            {!isAuthenticated ? (
+              <li className="pt-2">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsOpen(false);
+                      handleLogin();
+                    }}
+                    disabled={isLoading}
+                    className="flex-1 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Sign In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsOpen(false);
+                      handleSignup();
+                    }}
+                    disabled={isLoading}
+                    className="flex-1 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Sign Up
+                  </button>
+                </div>
+              </li>
+            ) : (
+              <li className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    handleLogout();
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </button>
+              </li>
+            )}
           </ul>
         </motion.div>
       )}
