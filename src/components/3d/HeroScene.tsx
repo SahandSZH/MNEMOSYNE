@@ -7,6 +7,7 @@ const ClinicModel = lazy(() => import("./ClinicModel"));
 const FloatingIcons = lazy(() => import("./FloatingIcons"));
 const ParticleField = lazy(() => import("./ParticleField"));
 const NeuralNetwork = lazy(() => import("./NeuralNetwork"));
+const ClinicalBackground = lazy(() => import("./ClinicalBackground"));
 
 const SceneContent = () => (
   <>
@@ -17,6 +18,7 @@ const SceneContent = () => (
     <pointLight position={[3, -1, -2]} intensity={0.2} color="#6c8cff" />
 
     {/* Scene elements */}
+    <ClinicalBackground />
     <NeuralNetwork />
     <ParticleField />
     <BrainModel />
