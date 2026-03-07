@@ -71,3 +71,53 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+## Auth0 Frontend-Backend Integration
+
+This project uses:
+
+- Frontend Auth SDK: `@auth0/auth0-react`
+- Backend token validation: `express-oauth2-jwt-bearer`
+
+### Environment setup
+
+Frontend:
+
+```sh
+cp .env.example .env
+```
+
+Backend:
+
+```sh
+cp server/.env.example server/.env
+```
+
+### Run frontend and backend
+
+```sh
+# Install frontend deps
+npm install
+
+# Install backend deps
+npm --prefix server install
+
+# Terminal 1: frontend (fixed port 5173)
+npm run dev
+
+# Terminal 2: backend API on port 8787
+npm run dev:api
+```
+
+### API endpoints
+
+- `GET /health` public
+- `GET /api/me` protected (JWT required)
+- `GET /api/doctor-only` protected + doctor role required
+
+### Quick verification checklist
+
+1. Login works from frontend.
+2. In the UI section **Auth API Test**, click **Test /api/me** and get user payload.
+3. For non-doctor users, **Test /api/doctor-only** returns `403`.
+4. For doctor-role users, **Test /api/doctor-only** returns success payload.
