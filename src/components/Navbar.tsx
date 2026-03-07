@@ -4,6 +4,7 @@ import { useAuth0 } from "@auth0/auth0-react";
 import { Brain, LogOut, Menu, X } from "lucide-react";
 
 const navItems = [
+  { label: "Auth API Test", href: "#auth-api-test" },
   { label: "Dashboard", href: "#dashboard" },
   { label: "Services", href: "#services" },
   { label: "Doctors", href: "#doctors" },

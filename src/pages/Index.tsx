@@ -3,6 +3,7 @@ import { Suspense, lazy } from "react";
 import Navbar from "@/components/Navbar";
 import HeroOverlay from "@/components/HeroOverlay";
 import Services from "@/components/Services";
+import AuthApiTester from "@/components/AuthApiTester";
 import Doctors from "@/components/Doctors";
 import Testimonials from "@/components/Testimonials";
 
@@ -25,6 +26,13 @@ const Index = () => {
       <main className="relative z-10">
         <section id="services" className="scroll-mt-24 py-16 sm:py-20">
           <Services />
+        </section>
+
+        <section
+          id="auth-api-test"
+          className="scroll-mt-24 bg-[linear-gradient(180deg,rgba(6,20,30,0.1),rgba(6,20,30,0.34),rgba(6,20,30,0.1))] py-16 sm:py-20"
+        >
+          <AuthApiTester />
         </section>
 
         {/*
