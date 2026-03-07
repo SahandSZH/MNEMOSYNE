@@ -3,9 +3,7 @@ import { Suspense, lazy } from "react";
 import Navbar from "@/components/Navbar";
 import HeroOverlay from "@/components/HeroOverlay";
 import Services from "@/components/Services";
-import Dashboard from "@/components/Dashboard";
 import Doctors from "@/components/Doctors";
-import BookingForm from "@/components/BookingForm";
 import Testimonials from "@/components/Testimonials";
 
 const HeroScene = lazy(() => import("@/components/3d/HeroScene"));
@@ -29,23 +27,27 @@ const Index = () => {
           <Services />
         </section>
 
+        {/*
         <section
           id="dashboard"
           className="scroll-mt-24 bg-[linear-gradient(180deg,rgba(6,20,30,0.1),rgba(6,20,30,0.34),rgba(6,20,30,0.1))] py-16 sm:py-20"
         >
           <Dashboard />
         </section>
+        */}
 
         <section id="doctors" className="scroll-mt-24 py-16 sm:py-20">
           <Doctors />
         </section>
 
-        <section
-          id="book-appointment"
-          className="scroll-mt-24 bg-[linear-gradient(120deg,rgba(65,200,220,0.08),rgba(7,22,32,0.42),rgba(65,200,220,0.08))] py-16 sm:py-20"
-        >
-          <BookingForm />
-        </section>
+        {/*
+          <section
+            id="book-appointment"
+            className="scroll-mt-24 bg-[linear-gradient(120deg,rgba(65,200,220,0.08),rgba(7,22,32,0.42),rgba(65,200,220,0.08))] py-16 sm:py-20"
+          >
+            <BookingForm />
+          </section>
+        */}
 
         <section id="testimonials" className="scroll-mt-24 py-16 sm:py-20">
           <Testimonials />
