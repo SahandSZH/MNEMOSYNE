@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { ArrowRight, Activity } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const HeroOverlay = () => {
   return (
@@ -39,13 +40,13 @@ const HeroOverlay = () => {
           transition={{ duration: 0.6, delay: 0.3 }}
           className="mt-9 flex flex-wrap gap-3"
         >
-          <a
-            href="#book-appointment"
+          <Link
+            to="/assessment"
             className="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-primary px-8 py-3 text-sm font-semibold text-primary-foreground transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             Start Checkup
             <ArrowRight className="h-4 w-4" />
-          </a>
+          </Link>
           {/*
           <a
             href="#dashboard"

@@ -3,10 +3,11 @@ import express from "express";
 
 import { checkJwt, getRoles, requireDoctor } from "./auth.js";
 import { config } from "./config.js";
+import { registerElevenLabsRoutes } from "./elevenlabs.js";
 
 const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: "25mb" }));
 app.use(
   cors({
     origin: config.clientOrigin,
@@ -16,6 +17,8 @@ app.use(
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
+
+registerElevenLabsRoutes(app);
 
 app.get("/api/me", checkJwt, (req, res) => {
   const payload = req.auth?.payload || {};
