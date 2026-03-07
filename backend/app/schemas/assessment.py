@@ -1,11 +1,11 @@
-from datetime import date, datetime
+from datetime import date as dt_date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class AssessmentCreate(BaseModel):
     patient_id: int
-    date: date | None = None
+    date: dt_date | None = None
     recall_score: int = Field(ge=0)
     drawing_score: int = Field(ge=0)
     fluency_score: int = Field(ge=0)
@@ -60,7 +60,7 @@ class AssessmentRead(BaseModel):
 
     id: int
     patient_id: int
-    date: date
+    date: dt_date
     recall_score: int
     drawing_score: int
     fluency_score: int
