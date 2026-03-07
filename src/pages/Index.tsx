@@ -1,79 +1,56 @@
 import { Suspense, lazy } from "react";
-import { motion } from "framer-motion";
-import StatsPanels from "@/components/StatsPanels";
+
+import Navbar from "@/components/Navbar";
+import HeroOverlay from "@/components/HeroOverlay";
+import Services from "@/components/Services";
+import Dashboard from "@/components/Dashboard";
+import Doctors from "@/components/Doctors";
+import BookingForm from "@/components/BookingForm";
+import Testimonials from "@/components/Testimonials";
 
 const HeroScene = lazy(() => import("@/components/3d/HeroScene"));
 
 const Index = () => {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-background">
-      {/* 3D Scene */}
-      <Suspense fallback={null}>
-        <HeroScene />
-      </Suspense>
+    <div className="relative bg-background text-foreground">
+      <Navbar />
 
-      {/* Gradient overlay for text readability */}
-      <div className="absolute inset-0 z-[1] bg-gradient-to-r from-background/90 via-background/50 to-transparent pointer-events-none" />
+      <section id="home" className="relative min-h-screen overflow-hidden">
+        <Suspense fallback={null}>
+          <HeroScene />
+        </Suspense>
+        <div className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(circle_at_78%_40%,rgba(64,196,214,0.18)_0%,transparent_40%),linear-gradient(to_right,rgba(7,20,30,0.94),rgba(7,20,30,0.56),rgba(7,20,30,0.3))]" />
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[2] h-28 bg-gradient-to-t from-background via-background/80 to-transparent" />
+        <HeroOverlay />
+      </section>
 
-      {/* Content overlay */}
-      <div className="relative z-10 flex flex-col justify-center min-h-screen px-6 sm:px-12 lg:px-20 max-w-7xl mx-auto">
-        <div className="max-w-xl">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
-          >
-            <span className="inline-block px-3 py-1 mb-6 text-xs font-display font-semibold uppercase tracking-widest text-primary border border-primary/30 rounded-full glow-border">
-              AI-Powered Healthcare
-            </span>
-          </motion.div>
+      <main className="relative z-10">
+        <section id="services" className="scroll-mt-24 py-16 sm:py-20">
+          <Services />
+        </section>
 
-          <motion.h1
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-            className="text-4xl sm:text-5xl lg:text-6xl font-display font-bold leading-tight mb-6"
-          >
-            <span className="text-foreground">The Future of </span>
-            <span className="gradient-text">Patient Monitoring</span>
-          </motion.h1>
+        <section
+          id="dashboard"
+          className="scroll-mt-24 bg-[linear-gradient(180deg,rgba(6,20,30,0.1),rgba(6,20,30,0.34),rgba(6,20,30,0.1))] py-16 sm:py-20"
+        >
+          <Dashboard />
+        </section>
 
-          <motion.p
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.4 }}
-            className="text-lg text-muted-foreground font-body leading-relaxed mb-10 max-w-md"
-          >
-            Real-time neural diagnostics and predictive health analytics
-            powered by advanced AI. Monitor, detect, and prevent.
-          </motion.p>
+        <section id="doctors" className="scroll-mt-24 py-16 sm:py-20">
+          <Doctors />
+        </section>
 
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.6 }}
-            className="flex flex-wrap gap-4 mb-12"
-          >
-            <button className="px-6 py-3 font-display font-semibold text-sm rounded-lg bg-primary text-primary-foreground hover:brightness-110 transition-all glow-border">
-              Get Started
-            </button>
-            <button className="px-6 py-3 font-display font-semibold text-sm rounded-lg border border-border text-foreground hover:border-primary/50 transition-all">
-              Learn More
-            </button>
-          </motion.div>
+        <section
+          id="book-appointment"
+          className="scroll-mt-24 bg-[linear-gradient(120deg,rgba(65,200,220,0.08),rgba(7,22,32,0.42),rgba(65,200,220,0.08))] py-16 sm:py-20"
+        >
+          <BookingForm />
+        </section>
 
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 1, delay: 1 }}
-          >
-            <StatsPanels />
-          </motion.div>
-        </div>
-      </div>
-
-      {/* Bottom gradient fade */}
-      <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent z-[2] pointer-events-none" />
+        <section id="testimonials" className="scroll-mt-24 py-16 sm:py-20">
+          <Testimonials />
+        </section>
+      </main>
     </div>
   );
 };
