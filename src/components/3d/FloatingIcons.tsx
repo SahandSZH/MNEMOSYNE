@@ -156,7 +156,25 @@ const HeartPulseRibbon = ({ position }: { position: [number, number, number] }) 
     return pts;
   }, []);
 
-  const geometry = useMemo(() => new THREE.BufferGeometry().setFromPoints(points), [points]);
+  const positions = useMemo(() => {
+    const pts: THREE.Vector3[] = [];
+    const segments = 80;
+    for (let i = 0; i < segments; i++) {
+      const x = (i / segments) * 3 - 1.5;
+      const t = (i % 20) / 20;
+      let y = 0;
+      if (t < 0.15) y = Math.sin(t / 0.15 * Math.PI) * 0.05;
+      else if (t < 0.25) y = -0.08;
+      else if (t < 0.35) y = 0.35;
+      else if (t < 0.45) y = -0.12;
+      else if (t < 0.6) y = Math.sin((t - 0.45) / 0.15 * Math.PI) * 0.08;
+      else y = 0;
+      pts.push(new THREE.Vector3(x, y, 0));
+    }
+    const arr = new Float32Array(pts.length * 3);
+    pts.forEach((p, i) => { arr[i*3]=p.x; arr[i*3+1]=p.y; arr[i*3+2]=p.z; });
+    return { array: arr, count: pts.length };
+  }, []);
 
   useFrame((state) => {
     if (groupRef.current) {
@@ -167,13 +185,12 @@ const HeartPulseRibbon = ({ position }: { position: [number, number, number] }) 
 
   return (
     <group ref={groupRef} position={position}>
-      <line ref={ref as any} geometry={geometry}>
+      <lineSegments>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" count={positions.count} array={positions.array} itemSize={3} />
+        </bufferGeometry>
         <lineBasicMaterial color="#4dd8e0" transparent opacity={0.8} />
-      </line>
-      {/* Glow duplicate */}
-      <line geometry={geometry}>
-        <lineBasicMaterial color="#4dd8e0" transparent opacity={0.2} linewidth={1} />
-      </line>
+      </lineSegments>
     </group>
   );
 };

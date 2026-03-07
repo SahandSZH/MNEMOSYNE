@@ -34,7 +34,11 @@ const ECGBackgroundLine = ({
     return pts;
   }, [width]);
 
-  const geometry = useMemo(() => new THREE.BufferGeometry().setFromPoints(points), [points]);
+  const posArr = useMemo(() => {
+    const arr = new Float32Array(points.length * 3);
+    points.forEach((p, i) => { arr[i*3]=p.x; arr[i*3+1]=p.y; arr[i*3+2]=p.z; });
+    return { array: arr, count: points.length };
+  }, [points]);
 
   useFrame((state) => {
     if (ref.current) {
@@ -44,9 +48,12 @@ const ECGBackgroundLine = ({
 
   return (
     <group ref={ref} position={position}>
-      <line geometry={geometry}>
+      <lineSegments>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" count={posArr.count} array={posArr.array} itemSize={3} />
+        </bufferGeometry>
         <lineBasicMaterial color="#4dd8e0" transparent opacity={opacity} />
-      </line>
+      </lineSegments>
     </group>
   );
 };
