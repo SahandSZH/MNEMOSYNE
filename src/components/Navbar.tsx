@@ -4,16 +4,17 @@ import { useAuth0 } from "@auth0/auth0-react";
 import { Brain, LogOut, Menu, X } from "lucide-react";
 
 const navItems = [
-  { label: "Auth API Test", href: "#auth-api-test" },
-  { label: "Dashboard", href: "#dashboard" },
+  // { label: "Auth API Test", href: "#auth-api-test" },
+  { label: "Dashboard", href: "#dashboard", requiresAuth: true },
   { label: "Services", href: "#services" },
-  { label: "Doctors", href: "#doctors" },
-  { label: "Book Appointment", href: "#book-appointment" },
+  // { label: "Doctors", href: "#doctors" },
+  // { label: "Book Appointment", href: "#book-appointment" },
 ];
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const { isLoading, isAuthenticated, user, loginWithRedirect, logout } = useAuth0();
+  const visibleNavItems = navItems.filter((item) => !item.requiresAuth || isAuthenticated);
 
   const handleLogin = () => loginWithRedirect();
   const handleSignup = () =>
@@ -36,7 +37,7 @@ const Navbar = () => {
 
         <div className="hidden items-center md:flex">
           <ul className="flex items-center gap-1">
-            {navItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <li key={item.label}>
                 <a
                   href={item.href}
@@ -103,7 +104,7 @@ const Navbar = () => {
           className="border-t border-border/50 bg-card md:hidden"
         >
           <ul className="space-y-1 px-4 py-3">
-            {navItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <li key={item.label}>
                 <a
                   href={item.href}
