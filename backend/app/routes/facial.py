@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth import require_roles
 from app.database import get_db
 from app.models.assessment import Assessment
+from app.models.assessment_session import AssessmentSession
 from app.schemas.assessment import (
     FacialBiometricCreate,
     FacialBiometricResponse,
@@ -19,16 +20,6 @@ router = APIRouter(prefix="/biometrics", tags=["biometrics"])
 facial_analysis_service = FacialAnalysisService()
 
 
-def _resolve_assessment_id(session_id: str) -> int:
-    try:
-        return int(session_id)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="session_id must map to an existing integer assessment id.",
-        ) from exc
-
-
 @router.post("/facial", response_model=FacialBiometricResponse)
 def upload_facial_metrics(
     payload: FacialBiometricCreate,
@@ -37,22 +28,22 @@ def upload_facial_metrics(
 ) -> FacialBiometricResponse:
     _ = current_user
 
-    assessment_id = _resolve_assessment_id(payload.session_id)
-
-    assessment = db.scalar(
-        select(Assessment)
+    session = db.scalar(
+        select(AssessmentSession)
         .options(
-            selectinload(Assessment.speech_metrics),
-            selectinload(Assessment.facial_metrics),
-            selectinload(Assessment.ai_report),
+            selectinload(AssessmentSession.assessment).selectinload(Assessment.session),
+            selectinload(AssessmentSession.assessment).selectinload(Assessment.speech_metrics),
+            selectinload(AssessmentSession.assessment).selectinload(Assessment.facial_metrics),
+            selectinload(AssessmentSession.assessment).selectinload(Assessment.ai_report),
         )
-        .where(Assessment.id == assessment_id)
+        .where(AssessmentSession.session_id == payload.session_id)
     )
-    if assessment is None:
+    if session is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Assessment not found for provided session_id.",
         )
+    assessment = session.assessment
     if assessment.patient_id != payload.patient_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -74,7 +65,7 @@ def upload_facial_metrics(
     return FacialBiometricResponse(
         assessment_id=assessment.id,
         patient_id=assessment.patient_id,
-        session_id=payload.session_id,
+        session_id=session.session_id,
         facial_metrics=FacialMetricsPayload(
             face_presence_score=metric.face_presence_score,
             blink_rate=metric.blink_rate,

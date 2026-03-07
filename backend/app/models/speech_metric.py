@@ -21,5 +21,6 @@ class SpeechMetric(Base):
     )
     word_count: Mapped[int] = mapped_column(Integer, nullable=False)
     speech_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    vocabulary_diversity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     assessment: Mapped["Assessment"] = relationship(back_populates="speech_metrics")

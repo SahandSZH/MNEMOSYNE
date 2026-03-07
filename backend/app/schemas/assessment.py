@@ -18,6 +18,20 @@ class SpeechMetricRead(BaseModel):
     assessment_id: int
     word_count: int
     speech_rate: float
+    vocabulary_diversity: float
+
+
+class ClockDrawingSubmissionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    assessment_id: int
+    filename: str
+    content_type: str
+    analyzed_score: int | None = None
+    analysis_notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class AIReportRead(BaseModel):
@@ -50,6 +64,8 @@ class AssessmentRead(BaseModel):
     recall_score: int
     drawing_score: int
     fluency_score: int
+    session_id: str | None = None
+    clock_drawing_submission: ClockDrawingSubmissionRead | None = None
     speech_metrics: SpeechMetricRead | None = None
     facial_metrics: FacialMetricRead | None = None
     ai_report: AIReportRead | None = None
@@ -57,9 +73,11 @@ class AssessmentRead(BaseModel):
 
 class SpeechUploadResponse(BaseModel):
     assessment_id: int
+    session_id: str | None = None
     transcript: str
     word_count: int
     speech_rate: float
+    vocabulary_diversity: float
 
 
 class FacialMetricsPayload(BaseModel):
@@ -82,3 +100,12 @@ class FacialBiometricResponse(BaseModel):
     facial_metrics: FacialMetricsPayload
     presage_behavioral_risk: str | None = None
     presage_risk_score: float | None = None
+
+
+class ClockDrawingUploadResponse(BaseModel):
+    assessment_id: int
+    session_id: str | None = None
+    filename: str
+    content_type: str
+    analyzed_score: int | None = None
+    analysis_notes: str | None = None

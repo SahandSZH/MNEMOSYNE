@@ -11,7 +11,10 @@ class ElevenLabsService:
             f"Placeholder transcript for {filename}. "
             "Replace with ElevenLabs Speech-to-Text API integration."
         )
-        word_count = len(transcript.split())
+        tokens = [token.lower().strip(".,!?;:") for token in transcript.split() if token.strip()]
+        word_count = len(tokens)
+        unique_word_count = len(set(tokens))
+        vocabulary_diversity = round(unique_word_count / word_count, 4) if word_count else 0.0
 
         # Rough estimate based on file size (assumes 16kHz mono PCM-like payload).
         duration_seconds = max(len(audio_bytes) / 32000.0, 1.0)
@@ -21,4 +24,5 @@ class ElevenLabsService:
             "transcript": transcript,
             "word_count": word_count,
             "speech_rate": speech_rate,
+            "vocabulary_diversity": vocabulary_diversity,
         }

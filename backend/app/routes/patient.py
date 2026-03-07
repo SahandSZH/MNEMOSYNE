@@ -25,6 +25,8 @@ def get_patient_with_assessments(
     patient = db.scalar(
         select(Patient)
         .options(
+            selectinload(Patient.assessments).selectinload(Assessment.session),
+            selectinload(Patient.assessments).selectinload(Assessment.clock_drawing_submission),
             selectinload(Patient.assessments).selectinload(Assessment.speech_metrics),
             selectinload(Patient.assessments).selectinload(Assessment.facial_metrics),
             selectinload(Patient.assessments).selectinload(Assessment.ai_report),

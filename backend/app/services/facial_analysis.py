@@ -71,6 +71,7 @@ class FacialAnalysisService:
             speech_metrics = {
                 "word_count": assessment.speech_metrics.word_count,
                 "speech_rate": assessment.speech_metrics.speech_rate,
+                "vocabulary_diversity": assessment.speech_metrics.vocabulary_diversity,
             }
 
         cognitive_scores = {
@@ -131,6 +132,7 @@ class FacialAnalysisService:
             speech_payload = {
                 "word_count": assessment.speech_metrics.word_count,
                 "speech_rate": assessment.speech_metrics.speech_rate,
+                "vocabulary_diversity": assessment.speech_metrics.vocabulary_diversity,
             }
 
         report_data = self.gemini_service.generate_assessment_report(

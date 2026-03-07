@@ -42,9 +42,13 @@ class GeminiService:
 
         if speech_metrics:
             speech_rate = self._safe_float(speech_metrics.get("speech_rate"))
+            vocabulary_diversity = self._safe_float(speech_metrics.get("vocabulary_diversity"))
             if speech_rate is not None and speech_rate < 90:
                 risk_points += 1
                 contributing_factors.append("Lower-than-expected speech rate during fluency task.")
+            if vocabulary_diversity is not None and vocabulary_diversity < 0.45:
+                risk_points += 1
+                contributing_factors.append("Low vocabulary diversity during speech task.")
 
         if facial_metrics:
             eye_focus_score = self._safe_float(facial_metrics.get("eye_focus_score"))

@@ -9,6 +9,7 @@ from app.auth import extract_roles, require_roles
 from app.database import get_db
 from app.models.ai_report import AIReport
 from app.models.assessment import Assessment
+from app.models.assessment_session import AssessmentSession
 from app.models.patient import Patient
 from app.schemas.assessment import AssessmentCreate, AssessmentRead
 from app.services.gemini_service import GeminiService
@@ -67,11 +68,14 @@ def create_assessment(
             risk_level=report_data["risk_level"],
         )
     )
+    db.add(AssessmentSession(assessment_id=assessment.id))
     db.commit()
 
     stored_assessment = db.scalar(
         select(Assessment)
         .options(
+            selectinload(Assessment.session),
+            selectinload(Assessment.clock_drawing_submission),
             selectinload(Assessment.speech_metrics),
             selectinload(Assessment.facial_metrics),
             selectinload(Assessment.ai_report),

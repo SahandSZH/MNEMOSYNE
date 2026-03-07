@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     app_name: str = "Remote Dementia Monitoring API"
     app_version: str = "0.1.0"
+    auto_create_tables: bool = False
 
     database_url: str = (
         "postgresql+psycopg2://postgres:postgres@localhost:5432/dementia_monitoring"

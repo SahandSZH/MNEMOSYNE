@@ -4,8 +4,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import Auth0Middleware
 from app.config import settings
 from app.database import Base, engine
-from app.models import AIReport, Assessment, FacialMetric, Patient, SpeechMetric  # noqa: F401
+from app.models import (  # noqa: F401
+    AIReport,
+    Assessment,
+    AssessmentSession,
+    ClockDrawingSubmission,
+    FacialMetric,
+    Patient,
+    SpeechMetric,
+)
 from app.routes.assessment import router as assessment_router
+from app.routes.clock_drawing import router as clock_drawing_router
 from app.routes.doctor import router as doctor_router
 from app.routes.facial import router as facial_router
 from app.routes.patient import router as patient_router
@@ -26,7 +35,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup_event() -> None:
-    Base.metadata.create_all(bind=engine)
+    if settings.auto_create_tables:
+        Base.metadata.create_all(bind=engine)
 
 
 @app.get("/")
@@ -40,6 +50,7 @@ def health_check() -> dict[str, str]:
 
 
 app.include_router(assessment_router)
+app.include_router(clock_drawing_router)
 app.include_router(speech_router)
 app.include_router(facial_router)
 app.include_router(patient_router)
