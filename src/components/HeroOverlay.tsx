@@ -1,8 +1,25 @@
 import { motion } from "framer-motion";
 import { ArrowRight, Activity } from "lucide-react";
-import { Link } from "react-router-dom";
+import { useAuth0 } from "@auth0/auth0-react";
+import { useNavigate } from "react-router-dom";
 
 const HeroOverlay = () => {
+  const { isAuthenticated, loginWithRedirect } = useAuth0();
+  const navigate = useNavigate();
+
+  const handleStartCheckup = () => {
+    if (isAuthenticated) {
+      navigate("/assessment");
+      return;
+    }
+
+    void loginWithRedirect({
+      appState: {
+        returnTo: "/assessment",
+      },
+    });
+  };
+
   return (
     <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl items-center px-4 pb-16 pt-28 sm:px-6 lg:px-8">
       <div className="max-w-2xl">
@@ -47,13 +64,14 @@ const HeroOverlay = () => {
           transition={{ duration: 0.6, delay: 0.3 }}
           className="mt-9 flex flex-wrap gap-3"
         >
-          <Link
-            to="/assessment"
+          <button
+            type="button"
+            onClick={handleStartCheckup}
             className="inline-flex min-w-48 items-center justify-center gap-2 rounded-md bg-primary px-8 py-3 text-sm font-semibold text-primary-foreground transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             Start Checkup
             <ArrowRight className="h-4 w-4" />
-          </Link>
+          </button>
           {/*
           <a
             href="#dashboard"
