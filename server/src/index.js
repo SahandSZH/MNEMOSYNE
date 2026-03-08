@@ -4,8 +4,15 @@ import express from "express";
 import { checkJwt, getRoles, requireDoctor } from "./auth.js";
 import { buildAiSummary, buildDoctorDashboardData, buildGeminiInputContract } from "./dashboardAnalysis.js";
 import { config } from "./config.js";
+import { healthCheckDatabase } from "./db.js";
 import { registerElevenLabsRoutes } from "./elevenlabs.js";
-import { getAllAssessmentAttempts, getPatientAssessmentHistory, saveAssessmentAttempt } from "./assessmentStore.js";
+import {
+  getAllAssessmentAttempts,
+  getPatientAssessmentHistory,
+  saveAssessmentAttempt,
+  syncAuth0UserProfile,
+} from "./assessmentStore.js";
+import { runMigrations } from "./migrations.js";
 
 const app = express();
 
@@ -16,8 +23,17 @@ app.use(
   }),
 );
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+app.get("/health", async (_req, res) => {
+  try {
+    await healthCheckDatabase();
+    res.json({ status: "ok", database: "connected" });
+  } catch (error) {
+    res.status(503).json({
+      status: "degraded",
+      database: "unavailable",
+      message: error instanceof Error ? error.message : "Database unavailable",
+    });
+  }
 });
 
 registerElevenLabsRoutes(app);
@@ -27,6 +43,7 @@ app.get("/api/me", checkJwt, (req, res) => {
   res.json({
     sub: payload.sub || "",
     email: payload.email || "",
+    name: payload.name || "",
     roles: getRoles(payload),
   });
 });
@@ -40,108 +57,124 @@ app.get("/api/doctor-only", checkJwt, requireDoctor, (req, res) => {
   });
 });
 
-app.post("/api/assessment-attempts", checkJwt, (req, res) => {
-  const payload = req.auth?.payload || {};
-  const patientSub = String(payload.sub || "unknown");
-  const patientEmail = String(payload.email || "");
-  const capturedAt = String(req.body?.capturedAt || new Date().toISOString());
+app.post("/api/users/sync", checkJwt, async (req, res, next) => {
+  try {
+    const tokenPayload = req.auth?.payload || {};
+    const tokenSub = String(tokenPayload.sub || "");
+    if (!tokenSub) {
+      return res.status(400).json({
+        error: "invalid_token_payload",
+        message: "Missing Auth0 subject (sub).",
+      });
+    }
 
-  const memoryRecall = {
-    score: Number(req.body?.memoryRecall?.score || 0),
-    maxScore: Number(req.body?.memoryRecall?.maxScore || 0),
-  };
+    const body = req.body || {};
+    const profile = {
+      sub: tokenSub,
+      user_id: tokenSub,
+      email:
+        typeof body.email === "string" && body.email.trim()
+          ? body.email.trim()
+          : String(tokenPayload.email || ""),
+      name:
+        typeof body.name === "string" && body.name.trim()
+          ? body.name.trim()
+          : String(tokenPayload.name || ""),
+      picture:
+        typeof body.picture === "string" && body.picture.trim()
+          ? body.picture.trim()
+          : String(tokenPayload.picture || ""),
+      source: "frontend-auth-sync",
+    };
 
-  const drawing = {
-    completedTasks: Number(req.body?.drawing?.completedTasks || 0),
-    totalTasks: Number(req.body?.drawing?.totalTasks || 0),
-    clockTimePrompt: String(req.body?.drawing?.clockTimePrompt || ""),
-  };
-
-  const speech = {
-    transcript: String(req.body?.speech?.transcript || ""),
-    wordCount: Number(req.body?.speech?.wordCount || 0),
-    speechRateWpm: Number(req.body?.speech?.speechRateWpm || 0),
-    vocabularyDiversity: Number(req.body?.speech?.vocabularyDiversity || 0),
-  };
-
-  const stage3 = {
-    targetWords: Array.isArray(req.body?.stage3?.targetWords)
-      ? req.body.stage3.targetWords.map((word) => String(word))
-      : [],
-    recall: {
-      matchedCount: Number(req.body?.stage3?.recall?.matchedCount || 0),
-      totalTargetWords: Number(req.body?.stage3?.recall?.totalTargetWords || 0),
-      accuracy: Number(req.body?.stage3?.recall?.accuracy || 0),
-      matchedWords: Array.isArray(req.body?.stage3?.recall?.matchedWords)
-        ? req.body.stage3.recall.matchedWords.map((word) => String(word))
-        : [],
-    },
-    repeatDurationSeconds: Number(req.body?.stage3?.repeatDurationSeconds || 0),
-    phase: String(req.body?.stage3?.phase || "listen"),
-    timestamps: {
-      listenPlayedAt: req.body?.stage3?.timestamps?.listenPlayedAt
-        ? String(req.body.stage3.timestamps.listenPlayedAt)
-        : null,
-      repeatStartedAt: req.body?.stage3?.timestamps?.repeatStartedAt
-        ? String(req.body.stage3.timestamps.repeatStartedAt)
-        : null,
-      repeatEndedAt: req.body?.stage3?.timestamps?.repeatEndedAt
-        ? String(req.body.stage3.timestamps.repeatEndedAt)
-        : null,
-    },
-  };
-
-  const presage = {
-    facialSignalsStatus: String(req.body?.presage?.facialSignalsStatus || "unknown"),
-    sessionQuality: String(req.body?.presage?.sessionQuality || "unavailable"),
-    source: String(req.body?.presage?.source || "unavailable"),
-    faceMissingEvents: Number(req.body?.presage?.faceMissingEvents || 0),
-    faceMissingSeconds: Number(req.body?.presage?.faceMissingSeconds || 0),
-    metrics: req.body?.presage?.metrics || null,
-  };
-
-  const attempt = {
-    id: `attempt-${Date.now()}`,
-    patientSub,
-    patientEmail,
-    capturedAt,
-    memoryRecall,
-    drawing,
-    speech,
-    stage3,
-    presage,
-  };
-
-  saveAssessmentAttempt(attempt);
-
-  const patientHistory = getPatientAssessmentHistory(patientSub);
-  const historyWithoutLatest = patientHistory.slice(0, -1);
-  const aiSummary = buildAiSummary(attempt, historyWithoutLatest);
-  const geminiInputContract = buildGeminiInputContract(attempt, historyWithoutLatest);
-
-  res.status(201).json({
-    saved: true,
-    attemptId: attempt.id,
-    aiSummary,
-    geminiInputContract,
-  });
+    const user = await syncAuth0UserProfile(profile);
+    return res.status(200).json({
+      saved: true,
+      user,
+    });
+  } catch (error) {
+    return next(error);
+  }
 });
 
-app.get("/api/doctor/dashboard", checkJwt, requireDoctor, (_req, res) => {
-  const allAttempts = getAllAssessmentAttempts();
-  const dashboard = buildDoctorDashboardData(allAttempts);
-  res.json(dashboard);
+app.post("/api/assessment-attempts", checkJwt, async (req, res, next) => {
+  try {
+    const tokenPayload = req.auth?.payload || {};
+    const patientSub = String(tokenPayload.sub || "").trim();
+    if (!patientSub) {
+      return res.status(400).json({
+        error: "invalid_token_payload",
+        message: "Missing Auth0 subject (sub).",
+      });
+    }
+
+    const patientEmail = String(tokenPayload.email || "").trim();
+    const patientName = String(tokenPayload.name || "").trim();
+
+    const attemptInput = {
+      ...req.body,
+      patientSub,
+      patientEmail,
+      patientName,
+    };
+
+    const savedAttempt = await saveAssessmentAttempt(attemptInput);
+
+    const patientHistory = await getPatientAssessmentHistory(patientSub);
+    const historyWithoutLatest = patientHistory.slice(0, -1);
+    const aiSummary = buildAiSummary(savedAttempt, historyWithoutLatest);
+    const geminiInputContract = buildGeminiInputContract(savedAttempt, historyWithoutLatest);
+
+    return res.status(201).json({
+      saved: true,
+      attemptId: savedAttempt.attemptId || savedAttempt.id,
+      aiSummary,
+      geminiInputContract,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/api/assessment-attempts/me", checkJwt, async (req, res, next) => {
+  try {
+    const payload = req.auth?.payload || {};
+    const patientSub = String(payload.sub || "");
+    const attempts = await getPatientAssessmentHistory(patientSub);
+    return res.json({ attempts });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/api/doctor/dashboard", checkJwt, requireDoctor, async (_req, res, next) => {
+  try {
+    const allAttempts = await getAllAssessmentAttempts();
+    const dashboard = buildDoctorDashboardData(allAttempts);
+    return res.json(dashboard);
+  } catch (error) {
+    return next(error);
+  }
 });
 
 app.use((err, _req, res, _next) => {
-  const status = err?.status || 401;
-  const message = err?.message || "Unauthorized";
+  const status = err?.status || 500;
+  const message = err?.message || "Internal server error";
   res.status(status).json({
-    error: "unauthorized",
+    error: status >= 500 ? "server_error" : "request_error",
     message,
   });
 });
 
-app.listen(config.port, () => {
-  console.log(`API server running at http://localhost:${config.port}`);
+async function startServer() {
+  await runMigrations();
+
+  app.listen(config.port, () => {
+    console.log(`API server running at http://localhost:${config.port}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error("Failed to start API server", error);
+  process.exit(1);
 });
