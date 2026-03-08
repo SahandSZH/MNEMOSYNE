@@ -2,14 +2,14 @@ import cors from "cors";
 import express from "express";
 
 import { checkJwt, getRoles, requireDoctor } from "./auth.js";
-import { buildAiSummary, buildDoctorDashboardData, buildGeminiInputContract } from "./dashboardAnalysis.js";
+import { buildAiSummary, buildGeminiInputContract } from "./dashboardAnalysis.js";
 import { config } from "./config.js";
 import { healthCheckDatabase } from "./db.js";
+import { getDoctorDashboardData } from "./doctorDashboardStore.js";
 import { registerElevenLabsRoutes } from "./elevenlabs.js";
 import { generateGeminiMonitoringReport } from "./geminiService.js";
 import {
   backfillAssessmentDerivedTables,
-  getAllAssessmentAttempts,
   getPatientAssessmentHistory,
   saveAssessmentAiReport,
   saveAssessmentAttempt,
@@ -169,8 +169,7 @@ app.get("/api/assessment-attempts/me", checkJwt, async (req, res, next) => {
 
 app.get("/api/doctor/dashboard", checkJwt, requireDoctor, async (_req, res, next) => {
   try {
-    const allAttempts = await getAllAssessmentAttempts();
-    const dashboard = buildDoctorDashboardData(allAttempts);
+    const dashboard = await getDoctorDashboardData();
     return res.json(dashboard);
   } catch (error) {
     return next(error);
