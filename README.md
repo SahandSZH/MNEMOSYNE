@@ -1,129 +1,159 @@
-# Welcome to your Lovable project
+# MNEMOSYNE
 
-## Project info
+Remote cognitive monitoring web application for dementia-adjacent clinical follow-up.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+This system is for monitoring and decision support. It does **not** diagnose dementia.
 
-## How can I edit this code?
+## Goals
 
-There are several ways of editing your application.
+- Let patients complete cognitive and speech assessments remotely.
+- Store longitudinal assessment data in PostgreSQL.
+- Generate AI-assisted monitoring summaries from current + historical signals.
+- Provide doctors a dashboard with patient trends, risk signals, and recent activity.
 
-**Use Lovable**
+## Current Stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
+### Frontend
 
 - Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+- React + TypeScript
+- Tailwind CSS + shadcn/ui
+- React Router
+- React Query
+- Recharts
+- React Three Fiber / Drei / Three.js
+- Auth0 (`@auth0/auth0-react`)
 
-## How can I deploy this project?
+### Backend
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+- Node.js + Express (ESM)
+- PostgreSQL (`pg`)
+- Auth0 JWT validation (`express-oauth2-jwt-bearer`)
+- ElevenLabs (TTS/STT routes)
+- Google Gemini (monitoring summaries + drawing scoring)
 
-## Can I connect a custom domain to my Lovable project?
+## High-Level Features
 
-Yes, you can!
+- Patient assessment flow:
+  - Word recall
+  - Drawing tasks (clock + shape copies)
+  - Memory challenge tasks
+  - Spoken recall with transcription
+- Auto-persistence of assessment payloads and derived per-test records.
+- AI summary generation with fallback behavior when model calls fail.
+- Doctor dashboard:
+  - Patient list and risk levels
+  - Trend summaries from stored sessions
+  - Deep analysis endpoints for doctor workflows
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## Project Layout
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- `src/` frontend application
+- `server/src/` backend API and persistence logic
+- `public/` static assets and assessment vocab
 
-## Auth0 Frontend-Backend Integration
+## Environment Variables (Public-Safe)
 
-This project uses:
+Use `.env.example` files as templates. Do not commit real secrets.
 
-- Frontend Auth SDK: `@auth0/auth0-react`
-- Backend token validation: `express-oauth2-jwt-bearer`
+### Frontend (`.env`)
 
-### Environment setup
+- `VITE_AUTH0_DOMAIN`
+- `VITE_AUTH0_CLIENT_ID`
+- `VITE_AUTH0_AUDIENCE`
+- `VITE_API_BASE_URL`
+- `VITE_FACE_MISSING_THRESHOLD_SECONDS`
+- `VITE_STAGE3_REPEAT_SECONDS`
+- `VITE_PRESAGE_DEV_MOCK`
+- `VITE_PRESAGE_API_KEY`
 
-Frontend:
+### Backend (`server/.env`)
+
+- `PORT`
+- `AUTH0_DOMAIN`
+- `AUTH0_AUDIENCE`
+- `AUTH0_ROLES_NAMESPACE`
+- `CLIENT_ORIGIN`
+- `DATABASE_URL`
+- `DATABASE_SSL_MODE`
+- `ELEVENLABS_API_KEY`
+- `ELEVENLABS_VOICE_ID`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `GEMINI_TIMEOUT_MS`
+- `GEMINI_ENABLED`
+
+## Local Setup
 
 ```sh
-cp .env.example .env
-```
-
-Backend:
-
-```sh
-cp server/.env.example server/.env
-```
-
-Set `DATABASE_URL` in `server/.env` to your Neon PostgreSQL URL.
-
-### Run frontend and backend
-
-```sh
-# Install frontend deps
+# from repo root
 npm install
-
-# Install backend deps
 npm --prefix server install
+```
 
-# Terminal 1: frontend (fixed port 8080)
+Create local env files:
+
+```sh
+# PowerShell
+Copy-Item .env.example .env
+Copy-Item server/.env.example server/.env
+```
+
+Set your own credentials in `.env` and `server/.env`.
+
+## Run the App
+
+```sh
+# Terminal 1 (frontend)
 npm run dev
 
-# Terminal 2: backend API on port 8787
+# Terminal 2 (backend)
 npm run dev:api
 ```
 
-### API endpoints
+Default local URLs:
 
-- `GET /health` public
-- `GET /api/me` protected (JWT required)
-- `GET /api/doctor-only` protected + doctor role required
-- `POST /api/users/sync` protected (stores Auth0 user in PostgreSQL)
-- `POST /api/assessment-attempts` protected (stores full assessment + per-test metrics in PostgreSQL)
-- `GET /api/assessment-attempts/me` protected (current patient history)
-- `GET /api/doctor/dashboard` protected + doctor role required (dashboard summary from DB)
+- Frontend: `http://localhost:5173`
+- API: `http://localhost:8787`
+- Health: `http://localhost:8787/health`
 
-### Quick verification checklist
+## Useful Commands
 
-1. Login works from frontend.
-2. In the UI section **Auth API Test**, click **Test /api/me** and get user payload.
-3. For non-doctor users, **Test /api/doctor-only** returns `403`.
-4. For doctor-role users, **Test /api/doctor-only** returns success payload.
+```sh
+npm run lint
+npm run test
+npm run build
+npm run preview
+```
+
+## API Surface (Main Routes)
+
+Public:
+
+- `GET /health`
+
+Protected:
+
+- `GET /api/me`
+- `GET /api/doctor-only` (doctor role required)
+- `POST /api/users/sync`
+- `POST /api/assessment-attempts`
+- `GET /api/assessment-attempts/me`
+- `GET /api/doctor/dashboard` (doctor role required)
+- `POST /api/assessment/:id/score-drawings` (doctor role required)
+- `GET /api/doctor/patients/:patientId/deep-analysis/latest` (doctor role required)
+- `POST /api/doctor/patients/:patientId/deep-analysis` (doctor role required)
+
+## Public Repo Checklist
+
+Before making this repository public:
+
+- Remove any real secrets from `.env` and `server/.env`.
+- Keep only placeholder values in `.env.example` files.
+- Rotate keys that were ever committed by mistake.
+- Verify CI/CD secrets are stored only in your hosting platform, not in git.
+
+## Clinical Disclaimer
+
+This software supports remote cognitive monitoring and trend review.
+It is not a diagnostic tool and should not be used as a standalone basis for medical diagnosis.
