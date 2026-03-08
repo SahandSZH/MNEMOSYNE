@@ -5,6 +5,10 @@ import { checkJwt, getRoles, requireDoctor } from "./auth.js";
 import { buildAiSummary, buildGeminiInputContract } from "./dashboardAnalysis.js";
 import { config } from "./config.js";
 import { healthCheckDatabase } from "./db.js";
+import {
+  getLatestDeepAnalysisForPatient,
+  runDeepAnalysisForPatient,
+} from "./deepAnalysisService.js";
 import { getDoctorDashboardData } from "./doctorDashboardStore.js";
 import { scoreDrawingsForAssessment } from "./drawingScoringService.js";
 import { registerElevenLabsRoutes } from "./elevenlabs.js";
@@ -196,6 +200,57 @@ app.post("/api/assessment/:id/score-drawings", checkJwt, requireDoctor, async (r
     return next(error);
   }
 });
+
+app.get(
+  "/api/doctor/patients/:patientId/deep-analysis/latest",
+  checkJwt,
+  requireDoctor,
+  async (req, res, next) => {
+    try {
+      const patientId = String(req.params.patientId || "").trim();
+      if (!patientId) {
+        return res.status(400).json({
+          error: "request_error",
+          message: "Patient identifier is required.",
+        });
+      }
+
+      const latest = await getLatestDeepAnalysisForPatient(patientId);
+      if (!latest) {
+        return res.status(404).json({
+          error: "not_found",
+          message: "No deep analysis report found for this patient.",
+        });
+      }
+
+      return res.status(200).json(latest);
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+app.post(
+  "/api/doctor/patients/:patientId/deep-analysis",
+  checkJwt,
+  requireDoctor,
+  async (req, res, next) => {
+    try {
+      const patientId = String(req.params.patientId || "").trim();
+      if (!patientId) {
+        return res.status(400).json({
+          error: "request_error",
+          message: "Patient identifier is required.",
+        });
+      }
+
+      const report = await runDeepAnalysisForPatient(patientId);
+      return res.status(200).json(report);
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
 
 app.use((err, _req, res, _next) => {
   const status = err?.status || 500;

@@ -1,9 +1,12 @@
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { DoctorDashboardPatient } from "@/types/presage";
+import type { DoctorDashboardPatient, DoctorDeepAnalysisUiState } from "@/types/presage";
 
 type DoctorTestCatalogProps = {
   patient?: DoctorDashboardPatient | null;
+  deepAnalysis: DoctorDeepAnalysisUiState;
+  onRunDeepAnalysis: (patientId: string) => Promise<void> | void;
 };
 
 const formatDate = (value: string) =>
@@ -39,7 +42,7 @@ const getFlagText = (risk: DoctorDashboardPatient["risk"], recallScore: number) 
   return "Routine follow-up";
 };
 
-const DoctorTestCatalog = ({ patient }: DoctorTestCatalogProps) => {
+const DoctorTestCatalog = ({ patient, deepAnalysis, onRunDeepAnalysis }: DoctorTestCatalogProps) => {
   if (!patient) {
     return (
       <Card className="border-border/70 bg-card/75">
@@ -167,6 +170,115 @@ const DoctorTestCatalog = ({ patient }: DoctorTestCatalogProps) => {
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="rounded-xl border border-border/70 bg-background/35 p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Deep Analysis</p>
+            <Button
+              size="sm"
+              onClick={() => onRunDeepAnalysis(patient.id)}
+              disabled={deepAnalysis.status === "loading"}
+            >
+              {deepAnalysis.status === "loading" ? "Running..." : "Run Deep Analysis"}
+            </Button>
+          </div>
+
+          {deepAnalysis.status === "idle" ? (
+            <p className="text-sm text-muted-foreground">
+              Run a monitoring-only deep analysis for this patient using recent structured metrics.
+            </p>
+          ) : null}
+
+          {deepAnalysis.status === "loading" ? (
+            <p className="text-sm text-muted-foreground">Generating report from Backboard/Gemini...</p>
+          ) : null}
+
+          {deepAnalysis.status === "error" ? (
+            <p className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+              {deepAnalysis.error || "Unable to generate deep analysis right now."}
+            </p>
+          ) : null}
+
+          {deepAnalysis.status === "success" && deepAnalysis.response ? (
+            <div className="space-y-3 text-sm">
+              <div className="rounded-md border border-border/60 bg-background/45 px-3 py-2">
+                <p className="text-xs text-muted-foreground">
+                  Source: {deepAnalysis.response.source}
+                  {deepAnalysis.response.model ? ` | Model: ${deepAnalysis.response.model}` : ""}
+                  {deepAnalysis.response.generatedAt
+                    ? ` | Generated: ${formatDateTime(deepAnalysis.response.generatedAt)}`
+                    : ""}
+                </p>
+                <p className="mt-1 text-foreground">
+                  {deepAnalysis.response.report.clinical_summary}
+                </p>
+                {deepAnalysis.response.error ? (
+                  <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-2 text-xs text-amber-200">
+                    {deepAnalysis.response.error}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-md border border-border/60 bg-background/45 px-3 py-2">
+                  <p className="mb-1 text-xs text-muted-foreground">Possible Decline Signals</p>
+                  {deepAnalysis.response.report.possible_decline_signals.length ? (
+                    <ul className="space-y-1 text-xs text-foreground/85">
+                      {deepAnalysis.response.report.possible_decline_signals.map((item, index) => (
+                        <li key={`possible-${index}`}>- {item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No decline signals flagged.</p>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-border/60 bg-background/45 px-3 py-2">
+                  <p className="mb-1 text-xs text-muted-foreground">Contributing Factors</p>
+                  {deepAnalysis.response.report.contributing_factors.length ? (
+                    <ul className="space-y-1 text-xs text-foreground/85">
+                      {deepAnalysis.response.report.contributing_factors.map((item, index) => (
+                        <li key={`factor-${index}`}>- {item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No additional factors identified.</p>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-border/60 bg-background/45 px-3 py-2">
+                  <p className="mb-1 text-xs text-muted-foreground">Data Quality Notes</p>
+                  {deepAnalysis.response.report.data_quality_notes.length ? (
+                    <ul className="space-y-1 text-xs text-foreground/85">
+                      {deepAnalysis.response.report.data_quality_notes.map((item, index) => (
+                        <li key={`quality-${index}`}>- {item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No data quality concerns.</p>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-border/60 bg-background/45 px-3 py-2">
+                  <p className="mb-1 text-xs text-muted-foreground">Recommended Follow-up Questions</p>
+                  {deepAnalysis.response.report.recommended_followup_questions.length ? (
+                    <ul className="space-y-1 text-xs text-foreground/85">
+                      {deepAnalysis.response.report.recommended_followup_questions.map((item, index) => (
+                        <li key={`followup-${index}`}>- {item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No follow-up suggestions generated.</p>
+                  )}
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Confidence: {deepAnalysis.response.report.confidence.toFixed(2)}
+              </p>
+            </div>
+          ) : null}
         </div>
 
         {/*

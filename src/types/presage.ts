@@ -337,3 +337,32 @@ export interface DoctorDashboardData {
   priorityQueue: DoctorDashboardPriorityItem[];
   activities: DoctorDashboardActivity[];
 }
+
+export interface DoctorDeepAnalysisReport {
+  clinical_summary: string;
+  possible_decline_signals: string[];
+  contributing_factors: string[];
+  data_quality_notes: string[];
+  recommended_followup_questions: string[];
+  confidence: number;
+}
+
+export type DoctorDeepAnalysisStatus = "idle" | "loading" | "success" | "error";
+
+export interface DoctorDeepAnalysisResponse {
+  id: number;
+  patientId: string;
+  assessmentCount: number;
+  generatedAt: string | null;
+  source: string;
+  model: string | null;
+  status: "success" | "fallback" | "error";
+  error: string | null;
+  report: DoctorDeepAnalysisReport;
+}
+
+export interface DoctorDeepAnalysisUiState {
+  status: DoctorDeepAnalysisStatus;
+  response: DoctorDeepAnalysisResponse | null;
+  error: string;
+}

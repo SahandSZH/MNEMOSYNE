@@ -17,6 +17,19 @@ export const config = {
   geminiModel: process.env.GEMINI_MODEL || "gemini-2.0-flash",
   geminiTimeoutMs: Number(process.env.GEMINI_TIMEOUT_MS || 15000),
   geminiEnabled: String(process.env.GEMINI_ENABLED || "true").toLowerCase() !== "false",
+  backboardApiKey: process.env.BACKBOARD_API_KEY || "",
+  backboardApiUrl:
+    process.env.BACKBOARD_API_URL || "https://api.backboard.io/v1/chat/completions",
+  backboardModel: process.env.BACKBOARD_MODEL || "google/gemini-2.0-flash",
+  backboardEnabled: String(process.env.BACKBOARD_ENABLED || "true").toLowerCase() !== "false",
+  deepAnalysisTimeoutMs: Math.max(
+    1000,
+    toNumber(process.env.DEEP_ANALYSIS_TIMEOUT_MS, toNumber(process.env.GEMINI_TIMEOUT_MS, 15000)),
+  ),
+  deepAnalysisMaxRetries: Math.max(
+    0,
+    Math.floor(toNumber(process.env.DEEP_ANALYSIS_MAX_RETRIES, 1)),
+  ),
   geminiDrawingTimeoutMs: Math.max(
     1000,
     toNumber(process.env.GEMINI_DRAWING_TIMEOUT_MS, toNumber(process.env.GEMINI_TIMEOUT_MS, 15000)),

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import { motion } from "framer-motion";
 import {
@@ -33,6 +33,8 @@ import {
 } from "@/components/ui/table";
 import DoctorTestCatalog from "@/components/DoctorTestCatalog";
 import type {
+  DoctorDeepAnalysisResponse,
+  DoctorDeepAnalysisUiState,
   DoctorDashboardActivity,
   DoctorDashboardData,
   DoctorDashboardPatient,
@@ -91,6 +93,12 @@ const parseApiError = async (response: Response) => {
   }
 };
 
+const initialDeepAnalysisState = (): DoctorDeepAnalysisUiState => ({
+  status: "idle",
+  response: null,
+  error: "",
+});
+
 const Dashboard = () => {
   const {
     isAuthenticated,
@@ -107,6 +115,7 @@ const Dashboard = () => {
   const [dashboardData, setDashboardData] = useState<DoctorDashboardData | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState("");
+  const [deepAnalysis, setDeepAnalysis] = useState<DoctorDeepAnalysisUiState>(initialDeepAnalysisState);
 
   const userRoles = useMemo(() => {
     const claims = user as Record<string, unknown> | undefined;
@@ -123,6 +132,23 @@ const Dashboard = () => {
 
   const isDoctorUser = userRoles.some((role) => role.toLowerCase() === "doctor");
 
+  const getApiToken = useCallback(async () => {
+    try {
+      return await getAccessTokenSilently({
+        authorizationParams: { audience: authAudience },
+      });
+    } catch (error) {
+      const code =
+        typeof error === "object" && error ? (error as { error?: string }).error : "";
+      if (code === "consent_required" || code === "login_required") {
+        return getAccessTokenWithPopup({
+          authorizationParams: { audience: authAudience },
+        });
+      }
+      throw error;
+    }
+  }, [getAccessTokenSilently, getAccessTokenWithPopup]);
+
   useEffect(() => {
     if (!isAuthenticated || !isDoctorUser) {
       setDashboardData(null);
@@ -132,23 +158,6 @@ const Dashboard = () => {
     }
 
     let isMounted = true;
-
-    const getApiToken = async () => {
-      try {
-        return await getAccessTokenSilently({
-          authorizationParams: { audience: authAudience },
-        });
-      } catch (error) {
-        const code =
-          typeof error === "object" && error ? (error as { error?: string }).error : "";
-        if (code === "consent_required" || code === "login_required") {
-          return getAccessTokenWithPopup({
-            authorizationParams: { audience: authAudience },
-          });
-        }
-        throw error;
-      }
-    };
 
     const fetchDashboard = async () => {
       setDashboardLoading(true);
@@ -190,7 +199,7 @@ const Dashboard = () => {
     return () => {
       isMounted = false;
     };
-  }, [getAccessTokenSilently, getAccessTokenWithPopup, isAuthenticated, isDoctorUser]);
+  }, [getApiToken, isAuthenticated, isDoctorUser]);
 
   const patients = dashboardData?.patients ?? [];
 
@@ -237,6 +246,114 @@ const Dashboard = () => {
 
   const selectedPatient: DoctorDashboardPatient | null =
     filteredPatients.find((patient) => patient.id === selectedPatientId) ?? null;
+
+  useEffect(() => {
+    if (!isAuthenticated || !isDoctorUser || !selectedPatientId) {
+      setDeepAnalysis(initialDeepAnalysisState());
+      return;
+    }
+
+    let isMounted = true;
+    setDeepAnalysis({
+      status: "loading",
+      response: null,
+      error: "",
+    });
+
+    const loadLatestDeepAnalysis = async () => {
+      try {
+        const token = await getApiToken();
+        const response = await fetch(
+          `${apiBaseUrl}/api/doctor/patients/${encodeURIComponent(selectedPatientId)}/deep-analysis/latest`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        );
+
+        if (response.status === 404) {
+          if (isMounted) {
+            setDeepAnalysis(initialDeepAnalysisState());
+          }
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(await parseApiError(response));
+        }
+
+        const payload = (await response.json()) as DoctorDeepAnalysisResponse;
+        if (!isMounted) return;
+        setDeepAnalysis({
+          status: "success",
+          response: payload,
+          error: "",
+        });
+      } catch (error) {
+        if (!isMounted) return;
+        const message =
+          error instanceof Error ? error.message : "Unable to load latest deep analysis report.";
+        setDeepAnalysis({
+          status: "error",
+          response: null,
+          error: message,
+        });
+      }
+    };
+
+    void loadLatestDeepAnalysis();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [getApiToken, isAuthenticated, isDoctorUser, selectedPatientId]);
+
+  const runDeepAnalysis = useCallback(
+    async (patientId: string) => {
+      const normalizedPatientId = String(patientId || "").trim();
+      if (!normalizedPatientId) return;
+
+      setDeepAnalysis({
+        status: "loading",
+        response: null,
+        error: "",
+      });
+
+      try {
+        const token = await getApiToken();
+        const response = await fetch(
+          `${apiBaseUrl}/api/doctor/patients/${encodeURIComponent(normalizedPatientId)}/deep-analysis`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(await parseApiError(response));
+        }
+
+        const payload = (await response.json()) as DoctorDeepAnalysisResponse;
+        setDeepAnalysis({
+          status: "success",
+          response: payload,
+          error: "",
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to run deep analysis.";
+        setDeepAnalysis({
+          status: "error",
+          response: null,
+          error: message,
+        });
+      }
+    },
+    [getApiToken],
+  );
 
   const priorityQueue = useMemo(() => {
     const queue = dashboardData?.priorityQueue ?? [];
@@ -581,7 +698,11 @@ const Dashboard = () => {
           className="lg:col-span-8"
           aria-label="Assessment test suite and latest patient result"
         >
-          <DoctorTestCatalog patient={selectedPatient} />
+          <DoctorTestCatalog
+            patient={selectedPatient}
+            deepAnalysis={deepAnalysis}
+            onRunDeepAnalysis={runDeepAnalysis}
+          />
         </motion.section>
 
         <motion.section
