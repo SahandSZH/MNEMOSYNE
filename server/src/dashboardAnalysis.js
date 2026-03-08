@@ -60,6 +60,32 @@ function buildSummaryText(contributingSignals) {
   return `Primary change observed in ${top.signal} (${top.direction}) compared to baseline trends.`;
 }
 
+function getPersistedAiReport(attempt) {
+  const report = attempt?.aiReport;
+  if (!report || typeof report !== "object") return null;
+
+  const clinicalSummary =
+    typeof report.clinicalSummary === "string" ? report.clinicalSummary.trim() : "";
+  if (!clinicalSummary) return null;
+
+  return {
+    clinicalSummary,
+    confidence: round(clamp(toNumber(report.confidence, 0), 0, 1), 3),
+    source: typeof report.source === "string" ? report.source : "unknown",
+    possibleDeclineSignals: Array.isArray(report.possibleDeclineSignals)
+      ? report.possibleDeclineSignals.map((item) => String(item)).filter(Boolean)
+      : [],
+    contributingFactors: Array.isArray(report.contributingFactors)
+      ? report.contributingFactors.map((item) => String(item)).filter(Boolean)
+      : [],
+    error: typeof report.error === "string" ? report.error : null,
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 export function buildGeminiInputContract(latestAttempt, history) {
   return {
     memoryScore: latestAttempt.memoryRecall,
@@ -122,13 +148,19 @@ export function buildDoctorDashboardData(allAttempts) {
 
   const historyWithoutLatest = allAttempts.slice(0, -1);
   const aiSummary = buildAiSummary(latestAttempt, historyWithoutLatest);
+  const persistedAiReport = getPersistedAiReport(latestAttempt);
 
   return {
     facialEngagementTrend,
     sessionQuality,
     contributingSignals: aiSummary.contributingSignals,
-    latestSummary: aiSummary.summaryText,
-    latestSummaryConfidence: aiSummary.summaryConfidence,
+    latestSummary: persistedAiReport?.clinicalSummary || aiSummary.summaryText,
+    latestSummaryConfidence:
+      persistedAiReport?.confidence ?? aiSummary.summaryConfidence,
+    summarySource: persistedAiReport?.source || "heuristic",
+    summaryError: persistedAiReport?.error || null,
+    possibleDeclineSignals: persistedAiReport?.possibleDeclineSignals || [],
+    contributingFactors: persistedAiReport?.contributingFactors || [],
     geminiInputContract: buildGeminiInputContract(latestAttempt, historyWithoutLatest),
   };
 }

@@ -220,6 +220,16 @@ const Assessment = () => {
   const recordingStoppedAtRef = useRef<number | null>(null);
   const listenPlayedAtRef = useRef<number | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const assessmentStartedAtRef = useRef<number | null>(null);
+  const stepStartedAtRef = useRef<number | null>(null);
+  const activeStepRef = useRef<number | null>(null);
+  const testDurationsRef = useRef<Record<number, number>>({
+    0: 0,
+    1: 0,
+    2: 0,
+    3: 0,
+    4: 0,
+  });
   const initial = useRef(buildInitialData());
 
   const [step, setStep] = useState(0);
@@ -260,6 +270,20 @@ const Assessment = () => {
   const progressValue = useMemo(() => ((step + 1) / totalSteps) * 100, [step]);
   const currentTestNumber = useMemo(() => getTestNumberForStep(step), [step]);
   const nextTestNumber = useMemo(() => getTestNumberForStep(nextStep), [nextStep]);
+
+  const roundSeconds = (value: number) => Number(value.toFixed(3));
+
+  const commitActiveStepDuration = (now = Date.now()) => {
+    const activeStep = activeStepRef.current;
+    const startedAt = stepStartedAtRef.current;
+    if (activeStep === null || startedAt === null) return;
+
+    const elapsedSeconds = Math.max(0, (now - startedAt) / 1000);
+    const testNumber = getTestNumberForStep(activeStep);
+    testDurationsRef.current[testNumber] =
+      (testDurationsRef.current[testNumber] || 0) + elapsedSeconds;
+    stepStartedAtRef.current = now;
+  };
 
   const getApiToken = async () => {
     try {
@@ -413,6 +437,22 @@ const Assessment = () => {
   }, [countdown, isTransitioning, nextStep]);
 
   useEffect(() => {
+    if (!hasStarted || isTransitioning) return;
+
+    const now = Date.now();
+    if (assessmentStartedAtRef.current === null) {
+      assessmentStartedAtRef.current = now;
+    }
+
+    if (activeStepRef.current !== null && activeStepRef.current !== step) {
+      commitActiveStepDuration(now);
+    }
+
+    activeStepRef.current = step;
+    stepStartedAtRef.current = now;
+  }, [hasStarted, isTransitioning, step]);
+
+  useEffect(() => {
     if (step < test2StepStart || step > test2StepEnd) return;
     setIsFlashVisible(true);
     setFlashCountdown(10);
@@ -435,6 +475,11 @@ const Assessment = () => {
   }, [step]);
 
   const beginTransition = (targetStep: number) => {
+    if (hasStarted && !isTransitioning) {
+      commitActiveStepDuration(Date.now());
+      activeStepRef.current = null;
+      stepStartedAtRef.current = null;
+    }
     setNextStep(targetStep);
     setCountdown(3);
     setIsTransitioning(true);
@@ -755,6 +800,8 @@ const Assessment = () => {
   };
 
   const buildAssessmentPayload = (): AssessmentAttemptPayload => {
+    const capturedAtTimestamp = Date.now();
+    const capturedAtIso = new Date(capturedAtTimestamp).toISOString();
     const selected = assessmentData.test2.part1.selections;
     const expected: string[] = assessmentData.test2.part1.objects.map((item) =>
       String(item.label),
@@ -779,8 +826,19 @@ const Assessment = () => {
         ? recallMetrics
         : computeRecallMetrics(assessmentData.test3.promptWords, assessmentData.test3.transcript);
 
+    const assessmentStartedAt = assessmentStartedAtRef.current;
+    const totalDurationSeconds = Math.max(
+      1,
+      (capturedAtTimestamp - (assessmentStartedAt ?? capturedAtTimestamp)) / 1000,
+    );
+    const trackedTestDurations = testDurationsRef.current;
+    const test0And4Seconds = (trackedTestDurations[0] || 0) + (trackedTestDurations[4] || 0);
+    const test1Seconds = trackedTestDurations[1] || 0;
+    const test2Seconds = trackedTestDurations[2] || 0;
+    const test3Seconds = trackedTestDurations[3] || 0;
+
     return {
-      capturedAt: new Date().toISOString(),
+      capturedAt: capturedAtIso,
       tests: {
         test0And4: {
           randomWords: assessmentData.test0Words,
@@ -850,11 +908,56 @@ const Assessment = () => {
         faceMissingSeconds: 0,
         metrics: null,
       },
+      timing: {
+        assessmentStartedAt: assessmentStartedAt ? new Date(assessmentStartedAt).toISOString() : null,
+        assessmentEndedAt: capturedAtIso,
+        totalDurationSeconds: roundSeconds(totalDurationSeconds),
+        tests: {
+          test0Seconds: roundSeconds(test0And4Seconds),
+          test1Seconds: roundSeconds(test1Seconds),
+          test2Seconds: roundSeconds(test2Seconds),
+          test3Seconds: roundSeconds(test3Seconds),
+        },
+      },
+      testData: {
+        test0Words: assessmentData.test0Words,
+        test1Drawings: { ...assessmentData.test1Drawings },
+        test2: {
+          part1: {
+            objects: assessmentData.test2.part1.objects.map((item) => ({
+              emoji: item.emoji,
+              label: item.label,
+            })),
+            options: assessmentData.test2.part1.options.map((item) => ({
+              emoji: item.emoji,
+              label: item.label,
+            })),
+            selections: [...assessmentData.test2.part1.selections],
+          },
+          part2: {
+            expectedAnswer: assessmentData.test2.part2.expectedAnswer,
+            answer: assessmentData.test2.part2.answer,
+          },
+          part3: {
+            targetSequence: [...assessmentData.test2.part3.targetSequence],
+            userSequence: [...assessmentData.test2.part3.userSequence],
+          },
+        },
+        test3: {
+          promptWords: [...assessmentData.test3.promptWords],
+          promptText: assessmentData.test3.promptText,
+          skipped: assessmentData.test3.skipped,
+          micPermission: assessmentData.test3.micPermission,
+        },
+      },
     };
   };
 
   const handleFinalSubmit = async () => {
     if (step !== finalStep) return;
+    commitActiveStepDuration(Date.now());
+    activeStepRef.current = null;
+    stepStartedAtRef.current = null;
     setIsSubmitted(true);
     const payload = buildAssessmentPayload();
     await persistAssessmentAttempt(payload);
