@@ -198,6 +198,42 @@ const statements = [
       expression_variability_json JSONB,
       face_presence_json JSONB
     );`,
+  `CREATE TABLE IF NOT EXISTS doctor_deep_analysis_reports (
+      id BIGSERIAL PRIMARY KEY,
+      patient_id TEXT NOT NULL,
+      assessment_count INTEGER NOT NULL DEFAULT 0,
+      generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      source TEXT NOT NULL DEFAULT 'fallback',
+      model TEXT,
+      status TEXT NOT NULL DEFAULT 'error',
+      error TEXT,
+      report_json JSONB NOT NULL
+    );`,
+  `ALTER TABLE doctor_deep_analysis_reports
+    ADD COLUMN IF NOT EXISTS assessment_count INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE doctor_deep_analysis_reports
+    ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'fallback';`,
+  `ALTER TABLE doctor_deep_analysis_reports
+    ADD COLUMN IF NOT EXISTS model TEXT;`,
+  `ALTER TABLE doctor_deep_analysis_reports
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'error';`,
+  `ALTER TABLE doctor_deep_analysis_reports
+    ADD COLUMN IF NOT EXISTS error TEXT;`,
+  `ALTER TABLE doctor_deep_analysis_reports
+    ADD COLUMN IF NOT EXISTS report_json JSONB NOT NULL DEFAULT '{}'::jsonb;`,
+  `DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_doctor_deep_analysis_reports_status'
+      ) THEN
+        ALTER TABLE doctor_deep_analysis_reports
+          ADD CONSTRAINT chk_doctor_deep_analysis_reports_status
+          CHECK (status IN ('success', 'fallback', 'error'));
+      END IF;
+    END
+  $$;`,
   `CREATE INDEX IF NOT EXISTS idx_assessments_patient_sub_captured
     ON assessments(patient_sub, captured_at DESC);`,
   `CREATE INDEX IF NOT EXISTS idx_assessments_captured
@@ -212,6 +248,8 @@ const statements = [
     ON test2_memory_challenge_results(assessment_id);`,
   `CREATE INDEX IF NOT EXISTS idx_test3_spoken_results_assessment
     ON test3_spoken_results(assessment_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_doctor_deep_analysis_patient_generated
+    ON doctor_deep_analysis_reports(patient_id, generated_at DESC);`,
 ];
 
 export async function runMigrations() {
