@@ -51,6 +51,14 @@ const objectPool = [
 ] as const;
 
 const colorEmojiPool = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪"] as const;
+const colorNameByEmoji: Record<(typeof colorEmojiPool)[number], string> = {
+  "🟥": "red",
+  "🟧": "orange",
+  "🟨": "yellow",
+  "🟩": "green",
+  "🟦": "blue",
+  "🟪": "purple",
+};
 
 const pickRandomWords = (sourceWords: string[], amount: number) => {
   const shuffled = [...sourceWords];
@@ -216,6 +224,10 @@ const Assessment = () => {
   const flashIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
+  const testNarrationAudioRef = useRef<HTMLAudioElement | null>(null);
+  const testNarrationAbortRef = useRef<AbortController | null>(null);
+  const testNarrationRequestIdRef = useRef(0);
+  const lastNarrationKeyRef = useRef("");
   const recordingStartedAtRef = useRef<number | null>(null);
   const recordingStoppedAtRef = useRef<number | null>(null);
   const listenPlayedAtRef = useRef<number | null>(null);
@@ -257,6 +269,9 @@ const Assessment = () => {
     matchedWords: [],
   });
   const [saveStatus, setSaveStatus] = useState("");
+  const [isTestNarrating, setIsTestNarrating] = useState(false);
+  const [testNarrationError, setTestNarrationError] = useState("");
+  const [testNarrationErrorStep, setTestNarrationErrorStep] = useState<number | null>(null);
   const clockInstructionTime = useMemo(() => makeRandomClockTime(), []);
   const drawingInstructions = useMemo(
     () => ({
@@ -270,8 +285,116 @@ const Assessment = () => {
   const progressValue = useMemo(() => ((step + 1) / totalSteps) * 100, [step]);
   const currentTestNumber = useMemo(() => getTestNumberForStep(step), [step]);
   const nextTestNumber = useMemo(() => getTestNumberForStep(nextStep), [nextStep]);
+  const test0WordsKey = useMemo(() => assessmentData.test0Words.join("|"), [assessmentData.test0Words]);
+  const test2Part1LabelsKey = useMemo(
+    () => assessmentData.test2.part1.objects.map((item) => item.label).join("|"),
+    [assessmentData.test2.part1.objects],
+  );
+  const test2Part3SequenceKey = useMemo(
+    () => assessmentData.test2.part3.targetSequence.join("|"),
+    [assessmentData.test2.part3.targetSequence],
+  );
 
   const roundSeconds = (value: number) => Number(value.toFixed(3));
+
+  const stopTestNarration = () => {
+    testNarrationAbortRef.current?.abort();
+    testNarrationAbortRef.current = null;
+    if (testNarrationAudioRef.current) {
+      testNarrationAudioRef.current.pause();
+      testNarrationAudioRef.current.src = "";
+      testNarrationAudioRef.current = null;
+    }
+    setIsTestNarrating(false);
+  };
+
+  const buildNarrationTextForStep = (targetStep: number) => {
+    if (targetStep === 0) {
+      const wordsText = assessmentData.test0Words.length
+        ? assessmentData.test0Words.join(", ")
+        : "No words available right now.";
+      return `Test zero. Word recall. Read and remember this word. ${wordsText}.`;
+    }
+
+    if (targetStep >= drawingStepStart && targetStep <= drawingStepEnd) {
+      return `Test one. Drawing exercise. ${drawingInstructions[targetStep as 1 | 2 | 3]}`;
+    }
+
+    if (targetStep === 4) {
+      const labels = assessmentData.test2.part1.objects.map((item) => item.label).join(", ");
+      return `Test two, part one. Memorize these three objects in order: ${labels}. Then select the matching three labels.`;
+    }
+
+    if (targetStep === 5) {
+      return `Test two, part two. Memorize this equation: ${equationText}. Then enter the final numeric answer.`;
+    }
+
+    if (targetStep === 6) {
+      const sequence = assessmentData.test2.part3.targetSequence
+        .map((emoji) => colorNameByEmoji[emoji as keyof typeof colorNameByEmoji] || emoji)
+        .join(", ");
+      return `Test two, part three. Memorize this four color sequence: ${sequence}. Then recreate it with the color buttons.`;
+    }
+
+    return "";
+  };
+
+  const playElevenLabsNarration = async (targetStep: number) => {
+    const narrationText = buildNarrationTextForStep(targetStep).trim();
+    if (!narrationText) return;
+
+    const requestId = testNarrationRequestIdRef.current + 1;
+    testNarrationRequestIdRef.current = requestId;
+
+    stopTestNarration();
+    setTestNarrationError("");
+    setTestNarrationErrorStep(null);
+    setIsTestNarrating(true);
+
+    const controller = new AbortController();
+    testNarrationAbortRef.current = controller;
+
+    try {
+      const response = await fetch("/api/elevenlabs/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: narrationText }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(await getApiErrorMessage(response, "TTS request failed."));
+      }
+      const payload = (await response.json()) as { audioBase64: string; mimeType?: string };
+      if (testNarrationRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      const audio = new Audio(
+        `data:${payload.mimeType || "audio/mpeg"};base64,${payload.audioBase64}`,
+      );
+      testNarrationAudioRef.current = audio;
+      audio.onended = () => {
+        if (testNarrationRequestIdRef.current === requestId) {
+          setIsTestNarrating(false);
+        }
+      };
+      audio.onerror = () => {
+        if (testNarrationRequestIdRef.current === requestId) {
+          setIsTestNarrating(false);
+          setTestNarrationErrorStep(targetStep);
+          setTestNarrationError("Voice playback failed. Please retry.");
+        }
+      };
+      await audio.play();
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const raw = error instanceof Error ? error.message : "TTS request failed.";
+      const reason = explainTtsFailure(raw);
+      setIsTestNarrating(false);
+      setTestNarrationErrorStep(targetStep);
+      setTestNarrationError(`ElevenLabs narration failed: ${reason}`);
+    }
+  };
 
   const commitActiveStepDuration = (now = Date.now()) => {
     const activeStep = activeStepRef.current;
@@ -387,6 +510,7 @@ const Assessment = () => {
 
   useEffect(() => {
     return () => {
+      stopTestNarration();
       audioStreamRef.current?.getTracks().forEach((track) => track.stop());
       audioStreamRef.current = null;
     };
@@ -397,6 +521,49 @@ const Assessment = () => {
       resetStage3Attempt();
     }
   }, [step]);
+
+  useEffect(() => {
+    if (step > test2StepEnd) {
+      stopTestNarration();
+    }
+  }, [step]);
+
+  useEffect(() => {
+    if (testNarrationErrorStep === null) return;
+    if (testNarrationErrorStep === step) return;
+    setTestNarrationError("");
+    setTestNarrationErrorStep(null);
+  }, [step, testNarrationErrorStep]);
+
+  useEffect(() => {
+    if (!hasStarted || isTransitioning) return;
+    if (step > test2StepEnd) return;
+
+    const drawingInstruction =
+      step >= drawingStepStart && step <= drawingStepEnd
+        ? drawingInstructions[step as 1 | 2 | 3]
+        : "";
+    const narrationKey = [
+      step,
+      test0WordsKey,
+      drawingInstruction,
+      test2Part1LabelsKey,
+      equationText,
+      test2Part3SequenceKey,
+    ].join("::");
+    if (lastNarrationKeyRef.current === narrationKey) return;
+    lastNarrationKeyRef.current = narrationKey;
+    void playElevenLabsNarration(step);
+  }, [
+    drawingInstructions,
+    equationText,
+    hasStarted,
+    isTransitioning,
+    step,
+    test0WordsKey,
+    test2Part1LabelsKey,
+    test2Part3SequenceKey,
+  ]);
 
   useEffect(() => {
     if (!isRecording) return;
@@ -1229,6 +1396,21 @@ const Assessment = () => {
                         />
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {step <= test2StepEnd && testNarrationErrorStep === step && testNarrationError && (
+                  <div className="space-y-2 rounded-md border border-rose-400/40 bg-rose-500/10 px-3 py-3 text-sm text-rose-200">
+                    <p>{testNarrationError}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void playElevenLabsNarration(step)}
+                      disabled={isTestNarrating}
+                    >
+                      {isTestNarrating ? "Retrying..." : "Retry Voice"}
+                    </Button>
                   </div>
                 )}
                 {saveStatus && <p className="text-sm text-muted-foreground">{saveStatus}</p>}
