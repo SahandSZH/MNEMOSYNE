@@ -767,7 +767,10 @@ export async function saveAssessmentAttempt(attemptInput) {
       ],
     );
 
-    return attempt;
+    return {
+      ...attempt,
+      assessmentId: Number(assessmentId),
+    };
   });
 }
 
