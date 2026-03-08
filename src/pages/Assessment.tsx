@@ -1,11 +1,24 @@
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 import { useNavigate } from "react-router-dom";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { calculateSpeechMetrics, derivePresageMetrics } from "@/lib/presageMetrics";
+import { startPresageRuntime } from "@/lib/presageRuntime";
+import type {
+  AssessmentAttemptPayload,
+  FacialSignalsStatus,
+  PresageDerivedMetrics,
+  RecallMetrics,
+  PresageSample,
+  PresageSignalSource,
+  SessionQuality,
+} from "@/types/presage";
 
 const totalSteps = 8;
 const finalStep = totalSteps - 1;
@@ -16,6 +29,16 @@ const drawingStepEnd = 3;
 const test2StepStart = 4;
 const test2StepEnd = 6;
 const test3Step = 7;
+const faceMissingThresholdSeconds =
+  Number(import.meta.env.VITE_FACE_MISSING_THRESHOLD_SECONDS || 3) || 3;
+const authAudience = import.meta.env.VITE_AUTH0_AUDIENCE || "https://mnemosyne-api";
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
+const configuredStage3RepeatSeconds =
+  Number(import.meta.env.VITE_STAGE3_REPEAT_SECONDS || 45) || 45;
+const stage3RepeatDurationSeconds = Math.max(
+  30,
+  Math.min(60, configuredStage3RepeatSeconds),
+);
 
 const drawingReferenceImages: Partial<Record<number, string>> = {
   2: "/Conjoined pentagons.png",
@@ -81,6 +104,29 @@ const makeEquation = () => {
 const makeRandomColorSequence = () =>
   Array.from({ length: 6 }, () => colorEmojiPool[randomInt(0, colorEmojiPool.length - 1)]);
 
+const normalizeWord = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const computeRecallMetrics = (targetWords: string[], transcript: string): RecallMetrics => {
+  const normalizedTargets = targetWords.map(normalizeWord).filter(Boolean);
+  const spokenWords = transcript
+    .split(/\s+/)
+    .map(normalizeWord)
+    .filter(Boolean);
+  const spokenSet = new Set(spokenWords);
+  const matchedWords = targetWords.filter((word) => spokenSet.has(normalizeWord(word)));
+  const matchedNormalized = new Set(matchedWords.map((word) => normalizeWord(word)));
+  const matchedCount = matchedNormalized.size;
+  const totalTargetWords = normalizedTargets.length;
+  const accuracy = totalTargetWords > 0 ? matchedCount / totalTargetWords : 0;
+
+  return {
+    matchedCount,
+    totalTargetWords,
+    accuracy: Number(accuracy.toFixed(3)),
+    matchedWords,
+  };
+};
+
 const getTestNumberForStep = (step: number) => {
   if (step === 0) return 0;
   if (step >= 1 && step <= 3) return 1;
@@ -96,6 +142,11 @@ const blobToBase64 = async (blob: Blob) => {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
+};
+
+const getApiErrorMessage = async (response: Response, fallback: string) => {
+  const text = await response.text();
+  return text || fallback;
 };
 
 const buildInitialData = () => {
@@ -131,11 +182,23 @@ const buildInitialData = () => {
 
 const Assessment = () => {
   const navigate = useNavigate();
+  const { isAuthenticated, getAccessTokenSilently, getAccessTokenWithPopup } = useAuth0();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const presageVideoRef = useRef<HTMLVideoElement | null>(null);
   const isDrawingRef = useRef(false);
   const flashIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const videoStreamRef = useRef<MediaStream | null>(null);
+  const presageControllerRef = useRef<{ stop: () => void } | null>(null);
+  const presageSamplesRef = useRef<PresageSample[]>([]);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const recordingStoppedAtRef = useRef<number | null>(null);
+  const listenPlayedAtRef = useRef<number | null>(null);
+  const faceMissingEventsRef = useRef(0);
+  const faceMissingSecondsRef = useRef(0);
+  const faceLastSeenAtRef = useRef<number | null>(null);
+  const facePromptShownRef = useRef(false);
   const chunksRef = useRef<Blob[]>([]);
   const initial = useRef(buildInitialData());
 
@@ -152,6 +215,26 @@ const Assessment = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isPlayingPrompt, setIsPlayingPrompt] = useState(false);
   const [test3Status, setTest3Status] = useState("");
+  const [test3Error, setTest3Error] = useState("");
+  const [test3Phase, setTest3Phase] = useState<"listen" | "repeat" | "analyze">("listen");
+  const [repeatRemainingSeconds, setRepeatRemainingSeconds] = useState(
+    stage3RepeatDurationSeconds,
+  );
+  const [recallMetrics, setRecallMetrics] = useState<RecallMetrics>({
+    matchedCount: 0,
+    totalTargetWords: 0,
+    accuracy: 0,
+    matchedWords: [],
+  });
+  const [saveStatus, setSaveStatus] = useState("");
+  const [presageMetrics, setPresageMetrics] = useState<PresageDerivedMetrics | null>(null);
+  const [facialSignalsStatus, setFacialSignalsStatus] =
+    useState<FacialSignalsStatus>("unknown");
+  const [sessionQuality, setSessionQuality] = useState<SessionQuality>("unavailable");
+  const [signalSource, setSignalSource] = useState<PresageSignalSource>("unavailable");
+  const [faceMissingPrompt, setFaceMissingPrompt] = useState(false);
+  const [faceMissingSeconds, setFaceMissingSeconds] = useState(0);
+  const [faceMissingEvents, setFaceMissingEvents] = useState(0);
   const clockInstructionTime = useMemo(() => makeRandomClockTime(), []);
   const drawingInstructions = useMemo(
     () => ({
@@ -166,12 +249,222 @@ const Assessment = () => {
   const currentTestNumber = useMemo(() => getTestNumberForStep(step), [step]);
   const nextTestNumber = useMemo(() => getTestNumberForStep(nextStep), [nextStep]);
 
+  const getApiToken = async () => {
+    try {
+      return await getAccessTokenSilently({
+        authorizationParams: { audience: authAudience },
+      });
+    } catch (error) {
+      const code =
+        typeof error === "object" && error ? (error as { error?: string }).error : "";
+      if (code === "consent_required" || code === "login_required") {
+        return getAccessTokenWithPopup({
+          authorizationParams: { audience: authAudience },
+        });
+      }
+      throw error;
+    }
+  };
+
+  const resetStage3Attempt = () => {
+    stopPresageCapture();
+    mediaRecorderRef.current = null;
+    audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+    audioStreamRef.current = null;
+
+    setIsRecording(false);
+    setIsPlayingPrompt(false);
+    setTest3Status("");
+    setTest3Error("");
+    setTest3Phase("listen");
+    setRepeatRemainingSeconds(stage3RepeatDurationSeconds);
+    setRecallMetrics({
+      matchedCount: 0,
+      totalTargetWords: 0,
+      accuracy: 0,
+      matchedWords: [],
+    });
+
+    setFacialSignalsStatus("unknown");
+    setSessionQuality("unavailable");
+    setSignalSource("unavailable");
+    setFaceMissingPrompt(false);
+    setFaceMissingSeconds(0);
+    setFaceMissingEvents(0);
+    setPresageMetrics(null);
+    setSaveStatus("");
+
+    faceMissingSecondsRef.current = 0;
+    faceMissingEventsRef.current = 0;
+    faceLastSeenAtRef.current = null;
+    facePromptShownRef.current = false;
+    presageSamplesRef.current = [];
+    recordingStartedAtRef.current = null;
+    recordingStoppedAtRef.current = null;
+    listenPlayedAtRef.current = null;
+    chunksRef.current = [];
+
+    setAssessmentData((prev) => ({
+      ...prev,
+      test3: {
+        ...prev.test3,
+        transcript: "",
+        skipped: false,
+        micPermission: "unknown",
+      },
+    }));
+  };
+
+  const stopPresageCapture = () => {
+    presageControllerRef.current?.stop();
+    presageControllerRef.current = null;
+
+    videoStreamRef.current?.getTracks().forEach((track) => track.stop());
+    videoStreamRef.current = null;
+
+    if (presageVideoRef.current) {
+      presageVideoRef.current.srcObject = null;
+    }
+  };
+
+  const onPresageSample = (sample: PresageSample) => {
+    const samples = [...presageSamplesRef.current, sample];
+    presageSamplesRef.current = samples;
+
+    const startedAt = recordingStartedAtRef.current || Date.now();
+    setPresageMetrics(derivePresageMetrics(samples, startedAt));
+
+    const hasFace = sample.facePresence >= 0.5;
+    if (hasFace) {
+      faceLastSeenAtRef.current = sample.timestamp;
+      setFaceMissingPrompt(false);
+      setFaceMissingSeconds(0);
+      faceMissingSecondsRef.current = 0;
+      facePromptShownRef.current = false;
+      setFacialSignalsStatus((previous) =>
+        previous === "unavailable" ? "unavailable" : "available",
+      );
+      setSessionQuality((previous) => (previous === "unavailable" ? "unavailable" : "good"));
+      return;
+    }
+
+    const baseline = faceLastSeenAtRef.current ?? recordingStartedAtRef.current ?? sample.timestamp;
+    const missingSeconds = Math.max(0, (sample.timestamp - baseline) / 1000);
+    faceMissingSecondsRef.current = missingSeconds;
+    setFaceMissingSeconds(missingSeconds);
+
+    if (missingSeconds >= faceMissingThresholdSeconds) {
+      setFaceMissingPrompt(true);
+      if (!facePromptShownRef.current) {
+        facePromptShownRef.current = true;
+        faceMissingEventsRef.current += 1;
+        setFaceMissingEvents(faceMissingEventsRef.current);
+      }
+      setSessionQuality("limited");
+      setFacialSignalsStatus((previous) =>
+        previous === "unavailable" ? "unavailable" : "limited",
+      );
+    }
+  };
+
+  const startPresageCapture = async () => {
+    try {
+      const cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 360 } },
+      });
+      videoStreamRef.current = cameraStream;
+
+      const videoEl = presageVideoRef.current;
+      if (!videoEl) {
+        throw new Error("Missing video element.");
+      }
+
+      videoEl.srcObject = cameraStream;
+      await videoEl.play();
+
+      const controller = await startPresageRuntime({
+        videoElement: videoEl,
+        onSample: onPresageSample,
+      });
+      presageControllerRef.current = controller;
+      setSignalSource(controller.source);
+      setFacialSignalsStatus("available");
+      setSessionQuality("good");
+    } catch {
+      setSignalSource("unavailable");
+      setFacialSignalsStatus("unavailable");
+      setSessionQuality("unavailable");
+      setFaceMissingPrompt(false);
+      setTest3Status((previous) =>
+        previous
+          ? `${previous} Camera unavailable, facial signals not captured.`
+          : "Camera unavailable, facial signals not captured.",
+      );
+    }
+  };
+
+  const persistAssessmentAttempt = async (payload: AssessmentAttemptPayload) => {
+    if (!isAuthenticated) {
+      setSaveStatus("Saved locally. Sign in to sync this assessment to the backend.");
+      return;
+    }
+
+    try {
+      const accessToken = await getApiToken();
+      const response = await fetch(`${apiBaseUrl}/api/assessment-attempts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const body = await response.text();
+      if (!response.ok) {
+        throw new Error(body || "Assessment sync failed.");
+      }
+
+      setSaveStatus("Assessment synced to backend.");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Sync failed: ${error.message}` : "Sync failed.");
+    }
+  };
+
   useEffect(() => {
     const onBack = () => navigate("/", { replace: true });
     window.history.pushState({}, "", window.location.href);
     window.addEventListener("popstate", onBack);
     return () => window.removeEventListener("popstate", onBack);
   }, [navigate]);
+
+  useEffect(() => {
+    return () => {
+      stopPresageCapture();
+      audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (step === test3Step) {
+      resetStage3Attempt();
+    }
+  }, [step]);
+
+  useEffect(() => {
+    if (!isRecording) return;
+    if (repeatRemainingSeconds <= 0) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setRepeatRemainingSeconds((value) => value - 1);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [isRecording, repeatRemainingSeconds]);
 
   useEffect(() => {
     const loadWords = async () => {
@@ -387,84 +680,130 @@ const Assessment = () => {
   const playTest3Prompt = async () => {
     if (!assessmentData.test3.promptText) return;
     try {
+      setTest3Error("");
       setIsPlayingPrompt(true);
-      setTest3Status("Playing prompt...");
+      setTest3Phase("listen");
+      setTest3Status("Listen phase: playing target words...");
       const response = await fetch("/api/elevenlabs/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: assessmentData.test3.promptText }),
       });
-      if (!response.ok) throw new Error();
+      if (!response.ok) {
+        throw new Error(await getApiErrorMessage(response, "TTS request failed."));
+      }
       const payload = (await response.json()) as { audioBase64: string; mimeType: string };
       const audio = new Audio(`data:${payload.mimeType || "audio/mpeg"};base64,${payload.audioBase64}`);
       await audio.play();
-      setTest3Status("Prompt played.");
-    } catch {
-      setTest3Status("TTS failed.");
+      listenPlayedAtRef.current = Date.now();
+      setTest3Phase("repeat");
+      setTest3Status("Repeat phase ready. Start recording and repeat the words.");
+    } catch (error) {
+      setTest3Error(error instanceof Error ? error.message : "Unable to play prompt.");
+      setTest3Status("Listen phase failed.");
     } finally {
       setIsPlayingPrompt(false);
     }
   };
 
   const startRecording = async () => {
+    setSaveStatus("");
+    setTest3Error("");
+    setFaceMissingPrompt(false);
+    setFaceMissingSeconds(0);
+    setFaceMissingEvents(0);
+    faceMissingSecondsRef.current = 0;
+    faceMissingEventsRef.current = 0;
+    faceLastSeenAtRef.current = null;
+    facePromptShownRef.current = false;
+    presageSamplesRef.current = [];
+    setPresageMetrics(null);
+    setRepeatRemainingSeconds(stage3RepeatDurationSeconds);
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
+      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = audioStream;
       setIsRecording(true);
+      setTest3Phase("repeat");
+      recordingStartedAtRef.current = Date.now();
+      recordingStoppedAtRef.current = null;
+      setTest3Status("Repeat phase: recording in progress.");
       setAssessmentData((prev) => ({
         ...prev,
         test3: { ...prev.test3, micPermission: "granted", skipped: false },
       }));
-      const recorder = new MediaRecorder(stream);
+
+      const recorder = new MediaRecorder(audioStream);
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
+
+      void startPresageCapture();
 
       recorder.ondataavailable = (event: BlobEvent) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
       };
 
       recorder.onstop = async () => {
+        recordingStoppedAtRef.current = Date.now();
+        setTest3Phase("analyze");
         const audioBlob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        stream.getTracks().forEach((t) => t.stop());
+        audioStream.getTracks().forEach((t) => t.stop());
+        audioStreamRef.current = null;
+        stopPresageCapture();
         setIsRecording(false);
         try {
-          setTest3Status("Transcribing...");
+          setTest3Status("Analyze phase: transcribing speech...");
           const audioBase64 = await blobToBase64(audioBlob);
           const response = await fetch("/api/elevenlabs/stt", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ audioBase64, mimeType: audioBlob.type || "audio/webm" }),
           });
-          if (!response.ok) throw new Error();
+          if (!response.ok) {
+            throw new Error(await getApiErrorMessage(response, "STT request failed."));
+          }
           const payload = (await response.json()) as { text: string };
+          const transcript = payload.text ?? "";
+          const computedRecall = computeRecallMetrics(assessmentData.test3.promptWords, transcript);
           setAssessmentData((prev) => ({
             ...prev,
-            test3: { ...prev.test3, transcript: payload.text ?? "" },
+            test3: { ...prev.test3, transcript },
           }));
-          setTest3Status("Transcription complete.");
-        } catch {
-          setTest3Status("STT failed.");
+          setRecallMetrics(computedRecall);
+          setTest3Status("Analyze phase complete.");
+          if (facialSignalsStatus === "available" && faceMissingEventsRef.current === 0) {
+            setSessionQuality("good");
+          }
+        } catch (error) {
+          setTest3Error(error instanceof Error ? error.message : "Transcription failed.");
+          setTest3Status("Analyze phase failed.");
         }
       };
 
       recorder.start();
-    } catch {
+    } catch (error) {
       setAssessmentData((prev) => ({
         ...prev,
         test3: {
           ...prev.test3,
           micPermission: "denied",
           skipped: true,
-          transcript: prev.test3.promptText,
+          transcript: "",
         },
       }));
-      setTest3Status("Microphone denied. Test skipped.");
+      setFacialSignalsStatus("unavailable");
+      setSessionQuality("unavailable");
+      setSignalSource("unavailable");
+      setTest3Phase("analyze");
+      setTest3Error(error instanceof Error ? error.message : "Microphone access denied.");
+      setTest3Status("Repeat phase skipped due to microphone denial.");
       setIsRecording(false);
     }
   };
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      setTest3Status("Analyze phase: processing recording...");
       mediaRecorderRef.current.stop();
     }
   };
@@ -494,9 +833,75 @@ const Assessment = () => {
     if (step < finalStep) setStep((v) => v + 1);
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const buildAssessmentPayload = (): AssessmentAttemptPayload => {
+    const selected = assessmentData.test2.part1.selections;
+    const expected = assessmentData.test2.part1.objects.map((item) => item.label);
+    const correctSelections = selected.filter((label) => expected.includes(label)).length;
+
+    const drawingCompleted = [1, 2, 3].filter(
+      (task) => Boolean(assessmentData.test1Drawings[task]),
+    ).length;
+
+    const startedAt = recordingStartedAtRef.current ?? Date.now();
+    const endedAt = recordingStoppedAtRef.current ?? Date.now();
+    const durationSeconds = Math.max(1, (endedAt - startedAt) / 1000);
+    const speech = calculateSpeechMetrics(assessmentData.test3.transcript, durationSeconds);
+    const finalRecall =
+      recallMetrics.totalTargetWords > 0
+        ? recallMetrics
+        : computeRecallMetrics(assessmentData.test3.promptWords, assessmentData.test3.transcript);
+
+    const finalMetrics =
+      presageMetrics ??
+      (presageSamplesRef.current.length
+        ? derivePresageMetrics(presageSamplesRef.current, startedAt)
+        : null);
+
+    return {
+      capturedAt: new Date().toISOString(),
+      memoryRecall: {
+        score: Math.max(0, Math.min(correctSelections, expected.length)),
+        maxScore: expected.length,
+      },
+      drawing: {
+        completedTasks: drawingCompleted,
+        totalTasks: 3,
+        clockTimePrompt: clockInstructionTime,
+      },
+      speech,
+      stage3: {
+        targetWords: assessmentData.test3.promptWords,
+        recall: finalRecall,
+        repeatDurationSeconds: stage3RepeatDurationSeconds,
+        phase: test3Phase,
+        timestamps: {
+          listenPlayedAt: listenPlayedAtRef.current
+            ? new Date(listenPlayedAtRef.current).toISOString()
+            : null,
+          repeatStartedAt: recordingStartedAtRef.current
+            ? new Date(recordingStartedAtRef.current).toISOString()
+            : null,
+          repeatEndedAt: recordingStoppedAtRef.current
+            ? new Date(recordingStoppedAtRef.current).toISOString()
+            : null,
+        },
+      },
+      presage: {
+        facialSignalsStatus,
+        sessionQuality,
+        source: signalSource,
+        faceMissingEvents: faceMissingEventsRef.current,
+        faceMissingSeconds: Number(faceMissingSecondsRef.current.toFixed(2)),
+        metrics: finalMetrics,
+      },
+    };
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsSubmitted(true);
+    const payload = buildAssessmentPayload();
+    await persistAssessmentAttempt(payload);
   };
 
   return (
@@ -627,29 +1032,168 @@ const Assessment = () => {
                 {step === test3Step && (
                   <div className="space-y-4">
                     <h2 className="text-center font-display text-3xl font-semibold">Test 3: Spoken Recall</h2>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      {(["listen", "repeat", "analyze"] as const).map((phase) => (
+                        <Badge
+                          key={phase}
+                          variant="outline"
+                          className={
+                            test3Phase === phase
+                              ? "border-primary/45 bg-primary/15 text-primary"
+                              : "border-border/70 bg-card/40 text-muted-foreground"
+                          }
+                        >
+                          {phase[0].toUpperCase()}
+                          {phase.slice(1)}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="rounded-md border border-border/70 bg-card/60 p-3 text-center">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Target Words (Listen and repeat)
+                      </p>
+                      <p className="mt-2 text-lg font-medium text-foreground">
+                        {assessmentData.test3.promptWords.join(" ")}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={
+                          sessionQuality === "good"
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                            : sessionQuality === "limited"
+                              ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                              : "border-rose-500/40 bg-rose-500/10 text-rose-300"
+                        }
+                      >
+                        Signal Quality: {sessionQuality}
+                      </Badge>
+                      <Badge variant="secondary" className="capitalize">
+                        {signalSource === "presage-sdk" ? "Presage SDK" : signalSource}
+                      </Badge>
+                      <Badge variant="outline">
+                        Timer: {repeatRemainingSeconds}s
+                      </Badge>
+                    </div>
+                    {faceMissingPrompt && (
+                      <p className="text-center text-sm text-amber-300">
+                        Please face camera. Test continues, but session quality is marked limited.
+                      </p>
+                    )}
+                    {test3Error && (
+                      <p className="text-center text-sm text-rose-300">
+                        {test3Error}
+                      </p>
+                    )}
                     <div className="flex flex-wrap justify-center gap-2">
-                      <Button type="button" onClick={playTest3Prompt} disabled={isPlayingPrompt}>
-                        {isPlayingPrompt ? "Playing..." : "Play Phrase"}
+                      <Button type="button" onClick={playTest3Prompt} disabled={isPlayingPrompt || isRecording}>
+                        {isPlayingPrompt ? "Playing..." : "1. Listen"}
                       </Button>
                       {!isRecording ? (
-                        <Button type="button" variant="outline" onClick={startRecording}>
-                          Start Recording
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={startRecording}
+                          disabled={test3Phase !== "repeat" || isPlayingPrompt}
+                        >
+                          2. Start Repeat
                         </Button>
                       ) : (
                         <Button type="button" variant="destructive" onClick={stopRecording}>
-                          Stop Recording
+                          Stop and Analyze
                         </Button>
                       )}
+                      <Button type="button" variant="ghost" onClick={resetStage3Attempt} disabled={isRecording}>
+                        Retry
+                      </Button>
                     </div>
                     {test3Status && <p className="text-center text-sm text-muted-foreground">{test3Status}</p>}
+                    <div className="grid gap-2 rounded-md border border-border/70 bg-card/60 p-3 text-sm sm:grid-cols-3">
+                      <p className="text-muted-foreground">
+                        Facial status:{" "}
+                        <span className="font-medium text-foreground">{facialSignalsStatus}</span>
+                      </p>
+                      <p className="text-muted-foreground">
+                        Face-missing events:{" "}
+                        <span className="font-medium text-foreground">{faceMissingEvents}</span>
+                      </p>
+                      <p className="text-muted-foreground">
+                        Missing seconds:{" "}
+                        <span className="font-medium text-foreground">
+                          {faceMissingSeconds.toFixed(1)}
+                        </span>
+                      </p>
+                    </div>
+                    <video
+                      ref={presageVideoRef}
+                      autoPlay
+                      muted
+                      playsInline
+                      className="mx-auto h-28 w-44 rounded-md border border-border/60 bg-black/30 object-cover"
+                    />
                     <div className="space-y-2">
                       <Label>Captured Transcript</Label>
                       <Input value={assessmentData.test3.transcript} readOnly />
                     </div>
+                    <div className="grid gap-2 rounded-md border border-border/70 bg-card/60 p-3 text-xs text-muted-foreground sm:grid-cols-2">
+                      <p>
+                        Recall matched words:{" "}
+                        <span className="text-foreground">
+                          {recallMetrics.matchedCount} / {recallMetrics.totalTargetWords}
+                        </span>
+                      </p>
+                      <p>
+                        Recall accuracy:{" "}
+                        <span className="text-foreground">{(recallMetrics.accuracy * 100).toFixed(1)}%</span>
+                      </p>
+                      <p className="sm:col-span-2">
+                        Matched words:{" "}
+                        <span className="text-foreground">
+                          {recallMetrics.matchedWords.length
+                            ? recallMetrics.matchedWords.join(", ")
+                            : "None yet"}
+                        </span>
+                      </p>
+                    </div>
+                    {presageMetrics && (
+                      <div className="grid gap-2 rounded-md border border-border/70 bg-card/60 p-3 text-xs text-muted-foreground sm:grid-cols-2">
+                        <p>
+                          Engagement avg/min/max:{" "}
+                          <span className="text-foreground">
+                            {presageMetrics.engagement.avg} / {presageMetrics.engagement.min} /{" "}
+                            {presageMetrics.engagement.max}
+                          </span>
+                        </p>
+                        <p>
+                          Blink avg/min/max:{" "}
+                          <span className="text-foreground">
+                            {presageMetrics.blinkRate.avg} / {presageMetrics.blinkRate.min} /{" "}
+                            {presageMetrics.blinkRate.max}
+                          </span>
+                        </p>
+                        <p>
+                          Expression avg/min/max:{" "}
+                          <span className="text-foreground">
+                            {presageMetrics.expressionVariability.avg} /{" "}
+                            {presageMetrics.expressionVariability.min} /{" "}
+                            {presageMetrics.expressionVariability.max}
+                          </span>
+                        </p>
+                        <p>
+                          Face presence avg/min/max:{" "}
+                          <span className="text-foreground">
+                            {presageMetrics.facePresence.avg} / {presageMetrics.facePresence.min} /{" "}
+                            {presageMetrics.facePresence.max}
+                          </span>
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {isSubmitted && <p className="text-sm text-muted-foreground">Assessment captured locally.</p>}
+                {isSubmitted && <p className="text-sm text-muted-foreground">Assessment submission captured.</p>}
+                {saveStatus && <p className="text-sm text-muted-foreground">{saveStatus}</p>}
 
                 <div className="flex justify-end pt-2">
                   {step < finalStep ? (
