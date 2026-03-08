@@ -18,8 +18,9 @@ const Index = () => {
         <Suspense fallback={null}>
           <HeroScene />
         </Suspense>
-        <div className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(circle_at_78%_40%,rgba(64,196,214,0.18)_0%,transparent_40%),linear-gradient(to_right,rgba(7,20,30,0.94),rgba(7,20,30,0.56),rgba(7,20,30,0.3))]" />
-        <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[2] h-28 bg-gradient-to-t from-background via-background/80 to-transparent" />
+        <div className="pointer-events-none absolute inset-0 z-[1] bg-black/12" />
+        <div className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(circle_at_78%_40%,rgba(64,196,214,0.08)_0%,transparent_60%),linear-gradient(to_right,rgba(7,20,30,0.36),rgba(7,20,30,0.2),rgba(7,20,30,0.1))]" />
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[2] h-28 bg-gradient-to-t from-background via-background/42 to-transparent" />
         <HeroOverlay />
       </section>
 
