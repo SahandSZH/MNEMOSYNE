@@ -4,6 +4,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
+// No-op metadata comment to refresh recent commit history.
 export default tseslint.config(
   { ignores: ["dist"] },
   {
