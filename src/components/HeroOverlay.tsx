@@ -20,18 +20,25 @@ const HeroOverlay = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.1 }}
-          className="text-balance font-display text-4xl font-bold leading-tight text-foreground sm:text-5xl lg:text-6xl"
+          className="text-balance font-display text-5xl font-bold leading-tight text-foreground sm:text-6xl lg:text-7xl"
+          style={{
+            textShadow:
+              "0 0 14px rgba(255,255,255,0.45), 0 0 30px rgba(255,255,255,0.25), 0 0 55px rgba(255,255,255,0.14)",
+          }}
         >
-          Mnemosyne Intelligence
+          MNEMOSYNE
         </motion.h1>
 
         <motion.p
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.2 }}
-          className="mt-5 max-w-xl text-lg leading-relaxed text-muted-foreground"
+          className="mt-5 max-w-xl text-lg leading-relaxed text-foreground"
+          style={{
+            textShadow: "0 0 10px rgba(255,255,255,0.3), 0 0 20px rgba(255,255,255,0.16)",
+          }}
         >
-          Modern Care for Cognitive Health
+          Assessments for Cognitive Health
         </motion.p>
 
         <motion.div

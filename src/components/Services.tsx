@@ -1,26 +1,21 @@
 import { motion } from "framer-motion";
-import { BrainCircuit, Mic, Stethoscope, Sparkles } from "lucide-react";
+import { Brain, Mic, PencilRuler } from "lucide-react";
 
 const services = [
   {
-    title: "Cognitive Testing",
-    description: "Structured memory and attention checks with clinician-friendly summaries.",
-    Icon: BrainCircuit,
+    title: "Motor Exercises",
+    description: "Visual-motor tasks where users draw target shapes as accurately as possible.",
+    Icon: PencilRuler,
+  },
+  {
+    title: "Memory Challenges",
+    description: "Short recall tasks using symbols, arithmetic, and color-sequence reproduction.",
+    Icon: Brain,
   },
   {
     title: "Speech Analysis",
-    description: "Track fluency, pauses, and verbal clarity over time using guided speech tasks.",
+    description: "Audio prompt and repetition test with transcription capture for later comparison.",
     Icon: Mic,
-  },
-  {
-    title: "Doctor Monitoring",
-    description: "Live monitoring panel for trends, patient progress flags, and intervention timing.",
-    Icon: Stethoscope,
-  },
-  {
-    title: "AI Health Insights",
-    description: "Clinical AI support for risk patterns and treatment plan prioritization.",
-    Icon: Sparkles,
   },
 ];
 
@@ -34,13 +29,13 @@ const Services = () => {
         transition={{ duration: 0.5 }}
         className="mb-10 max-w-2xl"
       >
-        <p className="mb-2 font-body text-xs uppercase tracking-[0.2em] text-primary">Services</p>
+        <p className="mb-2 font-body text-xs uppercase tracking-[0.2em] text-primary">Tests</p>
         <h2 className="font-display text-3xl font-semibold text-foreground sm:text-4xl">
-          Clinical workflows designed for dementia care
+          Assessment Metrics
         </h2>
       </motion.div>
 
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {services.map((service, index) => (
           <motion.article
             key={service.title}

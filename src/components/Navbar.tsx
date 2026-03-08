@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { useAuth0 } from "@auth0/auth0-react";
-import { Brain, LogOut, Menu, X } from "lucide-react";
+import { HeartPulse, LogOut, Menu, X } from "lucide-react";
 
 const navItems = [
   // { label: "Auth API Test", href: "#auth-api-test" },
   { label: "Dashboard", href: "#dashboard", requiresAuth: true },
-  { label: "Services", href: "#services" },
+  { label: "Tests", href: "#services" },
   // { label: "Doctors", href: "#doctors" },
   // { label: "Book Appointment", href: "#book-appointment" },
 ];
@@ -30,7 +30,7 @@ const Navbar = () => {
           className="inline-flex items-center gap-2 font-display text-sm font-semibold tracking-wide text-foreground transition-colors hover:text-primary"
         >
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-primary/40 bg-primary/10 text-primary">
-            <Brain className="h-4 w-4" />
+            <HeartPulse className="h-4 w-4" />
           </span>
           MNEMOSYNE CARE
         </a>
