@@ -817,6 +817,13 @@ const Assessment = () => {
       (task) => Boolean(assessmentData.test1Drawings[task]),
     ).length;
 
+    const test2Part2ExpectedAnswer = String(assessmentData.test2.part2.expectedAnswer).trim();
+    const test2Part2UserAnswer = assessmentData.test2.part2.answer.trim();
+    const test2Part2IsCorrect =
+      test2Part2ExpectedAnswer && test2Part2UserAnswer
+        ? test2Part2ExpectedAnswer === test2Part2UserAnswer
+        : null;
+
     const startedAt = recordingStartedAtRef.current ?? Date.now();
     const endedAt = recordingStoppedAtRef.current ?? Date.now();
     const durationSeconds = Math.max(1, (endedAt - startedAt) / 1000);
@@ -859,8 +866,9 @@ const Assessment = () => {
           },
           part2: {
             randomPrompt: equationText,
-            expectedAnswer: assessmentData.test2.part2.expectedAnswer,
-            userAnswer: assessmentData.test2.part2.answer,
+            expectedAnswer: test2Part2ExpectedAnswer,
+            userAnswer: test2Part2UserAnswer,
+            isCorrect: test2Part2IsCorrect,
           },
           part3: {
             randomPrompt: assessmentData.test2.part3.targetSequence,
@@ -935,8 +943,9 @@ const Assessment = () => {
             selections: [...assessmentData.test2.part1.selections],
           },
           part2: {
-            expectedAnswer: assessmentData.test2.part2.expectedAnswer,
-            answer: assessmentData.test2.part2.answer,
+            expectedAnswer: test2Part2ExpectedAnswer,
+            answer: test2Part2UserAnswer,
+            isCorrect: test2Part2IsCorrect,
           },
           part3: {
             targetSequence: [...assessmentData.test2.part3.targetSequence],

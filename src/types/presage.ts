@@ -73,6 +73,7 @@ export interface AssessmentTestData {
     part2: {
       expectedAnswer: string | number;
       answer: string;
+      isCorrect: boolean | null;
     };
     part3: {
       targetSequence: string[];
@@ -109,8 +110,9 @@ export interface AssessmentAttemptPayload {
       };
       part2: {
         randomPrompt: string;
-        expectedAnswer: number | string;
+        expectedAnswer: string | number;
         userAnswer: string;
+        isCorrect: boolean | null;
       };
       part3: {
         randomPrompt: string[];
@@ -152,17 +154,6 @@ export interface AssessmentAttemptPayload {
   testData: AssessmentTestData;
 }
 
-export interface DashboardTrendPoint {
-  label: string;
-  value: number;
-}
-
-export interface SessionQualityBreakdown {
-  good: number;
-  limited: number;
-  unavailable: number;
-}
-
 export interface ContributingSignal {
   signal: string;
   direction: "up" | "down" | "stable";
@@ -171,14 +162,167 @@ export interface ContributingSignal {
   note: string;
 }
 
-export interface DoctorDashboardData {
-  facialEngagementTrend: DashboardTrendPoint[];
-  sessionQuality: SessionQualityBreakdown;
+export type DoctorRiskLevel = "Low" | "Moderate" | "High";
+
+export interface DoctorDashboardTrendPoint {
+  label: string;
+  capturedAt: string;
+  cognitive: number;
+  speech: number;
+  memory: number;
+}
+
+export interface DoctorDashboardActivity {
+  id: string;
+  patientId: string;
+  patientName: string;
+  at: string;
+  note: string;
+  type: "assessment" | "follow-up" | "flag";
+}
+
+export interface DoctorDashboardTimingSummary {
+  assessmentStartedAt: string | null;
+  assessmentEndedAt: string | null;
+  totalDurationSeconds: number;
+}
+
+export interface DoctorDashboardLatestMemoryRecall {
+  score: number;
+  maxScore: number;
+  accuracyPercent: number;
+  durationSeconds: number;
+}
+
+export interface DoctorDashboardLatestMemoryChallenge {
+  part1Correct: number;
+  part1Total: number;
+  part1AccuracyPercent: number;
+  part3Correct: number;
+  part3Total: number;
+  part3AccuracyPercent: number;
+  durationSeconds: number;
+}
+
+export interface DoctorDashboardLatestDrawing {
+  completedTasks: number;
+  totalTasks: number;
+  completionPercent: number;
+  durationSeconds: number;
+}
+
+export interface DoctorDashboardLatestSpeech {
+  wordCount: number;
+  speechRateWpm: number;
+  vocabularyDiversityPercent: number;
+  recallAccuracyPercent: number;
+  matchedCount: number;
+  totalTargetWords: number;
+  durationSeconds: number;
+  phase: string;
+  micPermission: string;
+  skipped: boolean;
+  listenPlayedAt: string | null;
+  repeatStartedAt: string | null;
+  repeatEndedAt: string | null;
+}
+
+export interface DoctorDashboardLatestFacial {
+  status: string;
+  sessionQuality: string;
+  source: string;
+  faceMissingEvents: number;
+  faceMissingSeconds: number;
+  sampleCount: number;
+  startedAt: string | null;
+  endedAt: string | null;
+  engagementAvg: number | null;
+  blinkRateAvg: number | null;
+  expressionVariabilityAvg: number | null;
+  facePresenceAvg: number | null;
+}
+
+export interface DoctorDashboardLatestAssessment {
+  assessmentId: number;
+  capturedAt: string;
+  submittedAt: string | null;
+  timing: DoctorDashboardTimingSummary;
+  memoryRecall: DoctorDashboardLatestMemoryRecall;
+  memoryChallenge: DoctorDashboardLatestMemoryChallenge;
+  drawing: DoctorDashboardLatestDrawing;
+  speech: DoctorDashboardLatestSpeech;
+  facial: DoctorDashboardLatestFacial;
+}
+
+export interface DoctorDashboardPatientAggregates {
+  avgRecallAccuracyPercent: number;
+  avgDrawingCompletionPercent: number;
+  avgSpeechWordCount: number;
+  avgSpeechRateWpm: number;
+  avgVocabularyDiversityPercent: number;
+  avgSessionDurationSeconds: number;
+  avgFaceMissingSeconds: number;
+}
+
+export interface DoctorDashboardDataCoverage {
+  memoryRecall: number;
+  drawing: number;
+  memoryChallenge: number;
+  speech: number;
+  facial: number;
+}
+
+export interface DoctorDashboardPatient {
+  id: string;
+  name: string;
+  email: string;
+  code: string;
+  risk: DoctorRiskLevel;
+  assessedAt: string;
+  firstAssessedAt: string;
+  assessmentCount: number;
+  recallScore: number;
+  speechScore: number;
+  memoryScore: number;
+  engagementScore: number;
+  summary: string;
   contributingSignals: ContributingSignal[];
-  latestSummary: string;
+  trends: DoctorDashboardTrendPoint[];
+  activities: DoctorDashboardActivity[];
+  sessionQuality: string;
   latestSummaryConfidence: number;
-  summarySource?: string;
-  summaryError?: string | null;
-  possibleDeclineSignals?: string[];
-  contributingFactors?: string[];
+  summarySource: string;
+  summaryError: string | null;
+  possibleDeclineSignals: string[];
+  contributingFactors: string[];
+  latestAssessment: DoctorDashboardLatestAssessment;
+  aggregates: DoctorDashboardPatientAggregates;
+  dataCoverage: DoctorDashboardDataCoverage;
+}
+
+export interface DoctorDashboardKpis {
+  totalPatients: number;
+  totalAssessments: number;
+  newAssessments: number;
+  highRiskPatients: number;
+  avgCognitiveTrendDelta: number;
+  avgSessionDurationSeconds: number;
+  limitedSignalSessions: number;
+  unavailableSignalSessions: number;
+}
+
+export interface DoctorDashboardPriorityItem {
+  patientId: string;
+  name: string;
+  code: string;
+  risk: DoctorRiskLevel;
+  cognitiveDelta: number;
+}
+
+export interface DoctorDashboardData {
+  generatedAt: string;
+  kpis: DoctorDashboardKpis;
+  patients: DoctorDashboardPatient[];
+  priorityQueue: DoctorDashboardPriorityItem[];
+  activities: DoctorDashboardActivity[];
 }
