@@ -92,7 +92,7 @@ const makeEquation = () => {
 };
 
 const makeRandomColorSequence = () =>
-  Array.from({ length: 6 }, () => colorEmojiPool[randomInt(0, colorEmojiPool.length - 1)]);
+  Array.from({ length: 4 }, () => colorEmojiPool[randomInt(0, colorEmojiPool.length - 1)]);
 
 const normalizeWord = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -202,7 +202,7 @@ const buildInitialData = () => {
         micPermission: "unknown" as "unknown" | "granted" | "denied",
       },
       test4: {
-        recalledWords: ["", "", ""] as string[],
+        recalledWords: [""] as string[],
       },
     },
   };
@@ -341,7 +341,7 @@ const Assessment = () => {
   const persistAssessmentAttempt = async (payload: AssessmentAttemptPayload) => {
     if (!isAuthenticated) {
       setSaveStatus("Saved locally. Sign in to sync this assessment to the backend.");
-      return;
+      return false;
     }
 
     try {
@@ -361,10 +361,22 @@ const Assessment = () => {
       }
 
       setSaveStatus("Assessment synced to backend.");
+      return true;
     } catch (error) {
       setSaveStatus(error instanceof Error ? `Sync failed: ${error.message}` : "Sync failed.");
+      return false;
     }
   };
+
+  useEffect(() => {
+    if (!isSubmitted) return;
+
+    const redirectTimer = window.setTimeout(() => {
+      navigate("/", { replace: true });
+    }, 1800);
+
+    return () => window.clearTimeout(redirectTimer);
+  }, [isSubmitted, navigate]);
 
   useEffect(() => {
     const onBack = () => navigate("/", { replace: true });
@@ -406,7 +418,7 @@ const Assessment = () => {
         const response = await fetch("/test0vocab.txt", { cache: "no-store" });
         const text = await response.text();
         const list = text.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-        const test0Words = pickRandomWords(list, 3);
+        const test0Words = pickRandomWords(list, 1);
         const test3Words = pickRandomWords(list, 5);
         setAssessmentData((prev) => ({
           ...prev,
@@ -604,7 +616,7 @@ const Assessment = () => {
 
   const addColorChoice = (emoji: string) => {
     setAssessmentData((prev) => {
-      if (prev.test2.part3.userSequence.length >= 6) return prev;
+      if (prev.test2.part3.userSequence.length >= 4) return prev;
       return {
         ...prev,
         test2: {
@@ -967,9 +979,11 @@ const Assessment = () => {
     commitActiveStepDuration(Date.now());
     activeStepRef.current = null;
     stepStartedAtRef.current = null;
-    setIsSubmitted(true);
     const payload = buildAssessmentPayload();
-    await persistAssessmentAttempt(payload);
+    const didSave = await persistAssessmentAttempt(payload);
+    if (!didSave) return;
+    setSaveStatus("Assessment synced to backend. Redirecting...");
+    setIsSubmitted(true);
   };
 
   if (isSubmitted) {
@@ -977,9 +991,12 @@ const Assessment = () => {
       <div className="min-h-screen bg-background px-4 py-14 text-foreground sm:px-6">
         <div className="mx-auto max-w-3xl">
           <Card className="border-border/70">
-            <CardContent className="flex min-h-64 items-center justify-center text-center">
-              <p className="text-xl font-medium">Thank you for completing the assessment.</p>
-            </CardContent>
+              <CardContent className="flex min-h-64 items-center justify-center text-center">
+              <div className="space-y-2">
+                <p className="text-xl font-medium">Thank you for completing the assessment.</p>
+                <p className="text-sm text-muted-foreground">{saveStatus || "Redirecting to home..."}</p>
+              </div>
+              </CardContent>
           </Card>
         </div>
       </div>
@@ -1071,7 +1088,7 @@ const Assessment = () => {
                         )}
                         {step === 6 && (
                           <p className="mt-2 text-sm text-muted-foreground">
-                            Memorize the 6-color sequence, then recreate it with the color buttons.
+                            Memorize the 4-color sequence, then recreate it with the color buttons.
                           </p>
                         )}
                         {step === 4 && <p className="mt-3 text-4xl">{assessmentData.test2.part1.objects.map((x) => x.emoji).join(" ")}</p>}
@@ -1199,9 +1216,9 @@ const Assessment = () => {
                   <div className="space-y-4">
                     <h2 className="text-center font-display text-3xl font-semibold">Test 4: Word Recall Check</h2>
                     <p className="text-center text-sm text-muted-foreground">
-                      Enter the 3 words shown at the beginning of Test 0.
+                      Enter the word shown at the beginning of Test 0.
                     </p>
-                    <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-1">
                       {assessmentData.test4.recalledWords.map((word, index) => (
                         <Input
                           key={`test4-word-${index + 1}`}
