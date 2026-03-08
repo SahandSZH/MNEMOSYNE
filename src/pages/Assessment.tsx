@@ -8,29 +8,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { calculateSpeechMetrics, derivePresageMetrics } from "@/lib/presageMetrics";
-import { startPresageRuntime } from "@/lib/presageRuntime";
-import type {
-  AssessmentAttemptPayload,
-  FacialSignalsStatus,
-  PresageDerivedMetrics,
-  RecallMetrics,
-  PresageSample,
-  PresageSignalSource,
-  SessionQuality,
-} from "@/types/presage";
+import { calculateSpeechMetrics } from "@/lib/presageMetrics";
+import type { AssessmentAttemptPayload, RecallMetrics } from "@/types/presage";
 
-const totalSteps = 8;
+const totalSteps = 9;
 const finalStep = totalSteps - 1;
-const totalTests = 4;
+const totalTests = 5;
 
 const drawingStepStart = 1;
 const drawingStepEnd = 3;
 const test2StepStart = 4;
 const test2StepEnd = 6;
 const test3Step = 7;
-const faceMissingThresholdSeconds =
-  Number(import.meta.env.VITE_FACE_MISSING_THRESHOLD_SECONDS || 3) || 3;
+const test4Step = 8;
 const authAudience = import.meta.env.VITE_AUTH0_AUDIENCE || "https://mnemosyne-api";
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
 const configuredStage3RepeatSeconds =
@@ -131,16 +121,8 @@ const getTestNumberForStep = (step: number) => {
   if (step === 0) return 0;
   if (step >= 1 && step <= 3) return 1;
   if (step >= 4 && step <= 6) return 2;
-  return 3;
-};
-
-type TestDurationKey = "test0Seconds" | "test1Seconds" | "test2Seconds" | "test3Seconds";
-
-const getDurationKeyForTest = (testNumber: number): TestDurationKey => {
-  if (testNumber <= 0) return "test0Seconds";
-  if (testNumber === 1) return "test1Seconds";
-  if (testNumber === 2) return "test2Seconds";
-  return "test3Seconds";
+  if (step === 7) return 3;
+  return 4;
 };
 
 const blobToBase64 = async (blob: Blob) => {
@@ -155,7 +137,41 @@ const blobToBase64 = async (blob: Blob) => {
 
 const getApiErrorMessage = async (response: Response, fallback: string) => {
   const text = await response.text();
-  return text || fallback;
+  const trimmed = text.trim();
+  if (!trimmed) return fallback;
+
+  try {
+    const parsed = JSON.parse(trimmed) as { error?: string; message?: string };
+    return parsed.error || parsed.message || trimmed;
+  } catch {
+    return trimmed;
+  }
+};
+
+const explainTtsFailure = (message: string) => {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("elevenlabs_api_key is missing")) {
+    return "Server missing ELEVENLABS_API_KEY in server/.env";
+  }
+  if (normalized.includes("failed to fetch") || normalized.includes("networkerror")) {
+    return "Cannot reach backend API. Ensure both frontend and API server are running.";
+  }
+  if (normalized.includes("401") || normalized.includes("403")) {
+    return "ElevenLabs key is invalid or lacks permission for this request.";
+  }
+  if (normalized.includes("429")) {
+    return "ElevenLabs rate limit or quota exceeded.";
+  }
+  if (normalized.includes("voice")) {
+    return "Voice ID may be invalid or unavailable.";
+  }
+  if (normalized.includes("model")) {
+    return "Model ID may be invalid or unavailable.";
+  }
+  if (normalized.includes("text is required")) {
+    return "Prompt text is empty.";
+  }
+  return message;
 };
 
 const buildInitialData = () => {
@@ -185,6 +201,9 @@ const buildInitialData = () => {
         skipped: false,
         micPermission: "unknown" as "unknown" | "granted" | "denied",
       },
+      test4: {
+        recalledWords: ["", "", ""] as string[],
+      },
     },
   };
 };
@@ -193,32 +212,14 @@ const Assessment = () => {
   const navigate = useNavigate();
   const { isAuthenticated, getAccessTokenSilently, getAccessTokenWithPopup } = useAuth0();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const presageVideoRef = useRef<HTMLVideoElement | null>(null);
   const isDrawingRef = useRef(false);
   const flashIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
-  const videoStreamRef = useRef<MediaStream | null>(null);
-  const presageControllerRef = useRef<{ stop: () => void } | null>(null);
-  const presageSamplesRef = useRef<PresageSample[]>([]);
   const recordingStartedAtRef = useRef<number | null>(null);
   const recordingStoppedAtRef = useRef<number | null>(null);
   const listenPlayedAtRef = useRef<number | null>(null);
-  const faceMissingEventsRef = useRef(0);
-  const faceMissingSecondsRef = useRef(0);
-  const faceLastSeenAtRef = useRef<number | null>(null);
-  const facePromptShownRef = useRef(false);
   const chunksRef = useRef<Blob[]>([]);
-  const assessmentStartedAtRef = useRef<number | null>(null);
-  const assessmentEndedAtRef = useRef<number | null>(null);
-  const activeTestNumberRef = useRef<number | null>(null);
-  const activeTestStartedAtRef = useRef<number | null>(null);
-  const testDurationsRef = useRef<Record<TestDurationKey, number>>({
-    test0Seconds: 0,
-    test1Seconds: 0,
-    test2Seconds: 0,
-    test3Seconds: 0,
-  });
   const initial = useRef(buildInitialData());
 
   const [step, setStep] = useState(0);
@@ -227,7 +228,7 @@ const Assessment = () => {
   const [countdown, setCountdown] = useState(3);
   const [nextStep, setNextStep] = useState(0);
   const [isFlashVisible, setIsFlashVisible] = useState(false);
-  const [flashCountdown, setFlashCountdown] = useState(7);
+  const [flashCountdown, setFlashCountdown] = useState(10);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [equationText, setEquationText] = useState(initial.current.equationText);
   const [assessmentData, setAssessmentData] = useState(initial.current.data);
@@ -246,14 +247,6 @@ const Assessment = () => {
     matchedWords: [],
   });
   const [saveStatus, setSaveStatus] = useState("");
-  const [presageMetrics, setPresageMetrics] = useState<PresageDerivedMetrics | null>(null);
-  const [facialSignalsStatus, setFacialSignalsStatus] =
-    useState<FacialSignalsStatus>("unknown");
-  const [sessionQuality, setSessionQuality] = useState<SessionQuality>("unavailable");
-  const [signalSource, setSignalSource] = useState<PresageSignalSource>("unavailable");
-  const [faceMissingPrompt, setFaceMissingPrompt] = useState(false);
-  const [faceMissingSeconds, setFaceMissingSeconds] = useState(0);
-  const [faceMissingEvents, setFaceMissingEvents] = useState(0);
   const clockInstructionTime = useMemo(() => makeRandomClockTime(), []);
   const drawingInstructions = useMemo(
     () => ({
@@ -267,50 +260,6 @@ const Assessment = () => {
   const progressValue = useMemo(() => ((step + 1) / totalSteps) * 100, [step]);
   const currentTestNumber = useMemo(() => getTestNumberForStep(step), [step]);
   const nextTestNumber = useMemo(() => getTestNumberForStep(nextStep), [nextStep]);
-
-  const resetTimingState = () => {
-    assessmentStartedAtRef.current = null;
-    assessmentEndedAtRef.current = null;
-    activeTestNumberRef.current = null;
-    activeTestStartedAtRef.current = null;
-    testDurationsRef.current = {
-      test0Seconds: 0,
-      test1Seconds: 0,
-      test2Seconds: 0,
-      test3Seconds: 0,
-    };
-  };
-
-  const startAssessmentTiming = () => {
-    const now = Date.now();
-    assessmentStartedAtRef.current = now;
-    assessmentEndedAtRef.current = null;
-    activeTestNumberRef.current = null;
-    activeTestStartedAtRef.current = null;
-    testDurationsRef.current = {
-      test0Seconds: 0,
-      test1Seconds: 0,
-      test2Seconds: 0,
-      test3Seconds: 0,
-    };
-  };
-
-  const flushActiveTestDuration = (timestamp = Date.now()) => {
-    const activeTest = activeTestNumberRef.current;
-    const startedAt = activeTestStartedAtRef.current;
-    if (activeTest === null || startedAt === null) return;
-
-    const deltaSeconds = Math.max(0, (timestamp - startedAt) / 1000);
-    const key = getDurationKeyForTest(activeTest);
-    const previous = testDurationsRef.current[key] || 0;
-
-    testDurationsRef.current = {
-      ...testDurationsRef.current,
-      [key]: Number((previous + deltaSeconds).toFixed(3)),
-    };
-
-    activeTestStartedAtRef.current = timestamp;
-  };
 
   const getApiToken = async () => {
     try {
@@ -330,7 +279,6 @@ const Assessment = () => {
   };
 
   const resetStage3Attempt = () => {
-    stopPresageCapture();
     mediaRecorderRef.current = null;
     audioStreamRef.current?.getTracks().forEach((track) => track.stop());
     audioStreamRef.current = null;
@@ -348,20 +296,8 @@ const Assessment = () => {
       matchedWords: [],
     });
 
-    setFacialSignalsStatus("unknown");
-    setSessionQuality("unavailable");
-    setSignalSource("unavailable");
-    setFaceMissingPrompt(false);
-    setFaceMissingSeconds(0);
-    setFaceMissingEvents(0);
-    setPresageMetrics(null);
     setSaveStatus("");
 
-    faceMissingSecondsRef.current = 0;
-    faceMissingEventsRef.current = 0;
-    faceLastSeenAtRef.current = null;
-    facePromptShownRef.current = false;
-    presageSamplesRef.current = [];
     recordingStartedAtRef.current = null;
     recordingStoppedAtRef.current = null;
     listenPlayedAtRef.current = null;
@@ -376,94 +312,6 @@ const Assessment = () => {
         micPermission: "unknown",
       },
     }));
-  };
-
-  const stopPresageCapture = () => {
-    presageControllerRef.current?.stop();
-    presageControllerRef.current = null;
-
-    videoStreamRef.current?.getTracks().forEach((track) => track.stop());
-    videoStreamRef.current = null;
-
-    if (presageVideoRef.current) {
-      presageVideoRef.current.srcObject = null;
-    }
-  };
-
-  const onPresageSample = (sample: PresageSample) => {
-    const samples = [...presageSamplesRef.current, sample];
-    presageSamplesRef.current = samples;
-
-    const startedAt = recordingStartedAtRef.current || Date.now();
-    setPresageMetrics(derivePresageMetrics(samples, startedAt));
-
-    const hasFace = sample.facePresence >= 0.5;
-    if (hasFace) {
-      faceLastSeenAtRef.current = sample.timestamp;
-      setFaceMissingPrompt(false);
-      setFaceMissingSeconds(0);
-      faceMissingSecondsRef.current = 0;
-      facePromptShownRef.current = false;
-      setFacialSignalsStatus((previous) =>
-        previous === "unavailable" ? "unavailable" : "available",
-      );
-      setSessionQuality((previous) => (previous === "unavailable" ? "unavailable" : "good"));
-      return;
-    }
-
-    const baseline = faceLastSeenAtRef.current ?? recordingStartedAtRef.current ?? sample.timestamp;
-    const missingSeconds = Math.max(0, (sample.timestamp - baseline) / 1000);
-    faceMissingSecondsRef.current = missingSeconds;
-    setFaceMissingSeconds(missingSeconds);
-
-    if (missingSeconds >= faceMissingThresholdSeconds) {
-      setFaceMissingPrompt(true);
-      if (!facePromptShownRef.current) {
-        facePromptShownRef.current = true;
-        faceMissingEventsRef.current += 1;
-        setFaceMissingEvents(faceMissingEventsRef.current);
-      }
-      setSessionQuality("limited");
-      setFacialSignalsStatus((previous) =>
-        previous === "unavailable" ? "unavailable" : "limited",
-      );
-    }
-  };
-
-  const startPresageCapture = async () => {
-    try {
-      const cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 360 } },
-      });
-      videoStreamRef.current = cameraStream;
-
-      const videoEl = presageVideoRef.current;
-      if (!videoEl) {
-        throw new Error("Missing video element.");
-      }
-
-      videoEl.srcObject = cameraStream;
-      await videoEl.play();
-
-      const controller = await startPresageRuntime({
-        videoElement: videoEl,
-        onSample: onPresageSample,
-      });
-      presageControllerRef.current = controller;
-      setSignalSource(controller.source);
-      setFacialSignalsStatus("available");
-      setSessionQuality("good");
-    } catch {
-      setSignalSource("unavailable");
-      setFacialSignalsStatus("unavailable");
-      setSessionQuality("unavailable");
-      setFaceMissingPrompt(false);
-      setTest3Status((previous) =>
-        previous
-          ? `${previous} Camera unavailable, facial signals not captured.`
-          : "Camera unavailable, facial signals not captured.",
-      );
-    }
   };
 
   const persistAssessmentAttempt = async (payload: AssessmentAttemptPayload) => {
@@ -503,9 +351,6 @@ const Assessment = () => {
 
   useEffect(() => {
     return () => {
-      flushActiveTestDuration();
-      resetTimingState();
-      stopPresageCapture();
       audioStreamRef.current?.getTracks().forEach((track) => track.stop());
       audioStreamRef.current = null;
     };
@@ -516,36 +361,6 @@ const Assessment = () => {
       resetStage3Attempt();
     }
   }, [step]);
-
-  useEffect(() => {
-    if (!hasStarted) return;
-
-    if (isTransitioning) {
-      flushActiveTestDuration();
-      activeTestStartedAtRef.current = null;
-      return;
-    }
-
-    const now = Date.now();
-
-    if (activeTestNumberRef.current === null) {
-      activeTestNumberRef.current = currentTestNumber;
-      activeTestStartedAtRef.current = now;
-      return;
-    }
-
-    if (activeTestStartedAtRef.current === null) {
-      activeTestStartedAtRef.current = now;
-      activeTestNumberRef.current = currentTestNumber;
-      return;
-    }
-
-    if (activeTestNumberRef.current !== currentTestNumber) {
-      flushActiveTestDuration(now);
-      activeTestNumberRef.current = currentTestNumber;
-      activeTestStartedAtRef.current = now;
-    }
-  }, [currentTestNumber, hasStarted, isTransitioning]);
 
   useEffect(() => {
     if (!isRecording) return;
@@ -567,7 +382,7 @@ const Assessment = () => {
         const response = await fetch("/test0vocab.txt", { cache: "no-store" });
         const text = await response.text();
         const list = text.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-        const test0Words = pickRandomWords(list, 5);
+        const test0Words = pickRandomWords(list, 3);
         const test3Words = pickRandomWords(list, 5);
         setAssessmentData((prev) => ({
           ...prev,
@@ -600,7 +415,7 @@ const Assessment = () => {
   useEffect(() => {
     if (step < test2StepStart || step > test2StepEnd) return;
     setIsFlashVisible(true);
-    setFlashCountdown(7);
+    setFlashCountdown(10);
     if (flashIntervalRef.current) clearInterval(flashIntervalRef.current);
     flashIntervalRef.current = setInterval(() => {
       setFlashCountdown((v) => {
@@ -620,9 +435,6 @@ const Assessment = () => {
   }, [step]);
 
   const beginTransition = (targetStep: number) => {
-    if (targetStep === 0 && !assessmentStartedAtRef.current) {
-      startAssessmentTiming();
-    }
     setNextStep(targetStep);
     setCountdown(3);
     setIsTransitioning(true);
@@ -775,6 +587,33 @@ const Assessment = () => {
     }));
   };
 
+  const updateTest4Word = (index: number, value: string) => {
+    setAssessmentData((prev) => {
+      const nextWords = [...prev.test4.recalledWords];
+      nextWords[index] = value;
+      return {
+        ...prev,
+        test4: {
+          ...prev.test4,
+          recalledWords: nextWords,
+        },
+      };
+    });
+  };
+
+  const clearPart1Selections = () => {
+    setAssessmentData((prev) => ({
+      ...prev,
+      test2: {
+        ...prev.test2,
+        part1: {
+          ...prev.test2.part1,
+          selections: [],
+        },
+      },
+    }));
+  };
+
   const playTest3Prompt = async () => {
     if (!assessmentData.test3.promptText) return;
     try {
@@ -797,8 +636,10 @@ const Assessment = () => {
       setTest3Phase("repeat");
       setTest3Status("Repeat phase ready. Start recording and repeat the words.");
     } catch (error) {
-      setTest3Error(error instanceof Error ? error.message : "Unable to play prompt.");
-      setTest3Status("Listen phase failed.");
+      const raw = error instanceof Error ? error.message : "Unable to play prompt.";
+      const reason = explainTtsFailure(raw);
+      setTest3Error(`TTS request failed: ${reason}`);
+      setTest3Status(`Listen phase failed: ${reason}`);
     } finally {
       setIsPlayingPrompt(false);
     }
@@ -807,15 +648,6 @@ const Assessment = () => {
   const startRecording = async () => {
     setSaveStatus("");
     setTest3Error("");
-    setFaceMissingPrompt(false);
-    setFaceMissingSeconds(0);
-    setFaceMissingEvents(0);
-    faceMissingSecondsRef.current = 0;
-    faceMissingEventsRef.current = 0;
-    faceLastSeenAtRef.current = null;
-    facePromptShownRef.current = false;
-    presageSamplesRef.current = [];
-    setPresageMetrics(null);
     setRepeatRemainingSeconds(stage3RepeatDurationSeconds);
 
     try {
@@ -835,8 +667,6 @@ const Assessment = () => {
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
 
-      void startPresageCapture();
-
       recorder.ondataavailable = (event: BlobEvent) => {
         if (event.data.size > 0) chunksRef.current.push(event.data);
       };
@@ -847,7 +677,6 @@ const Assessment = () => {
         const audioBlob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
         audioStream.getTracks().forEach((t) => t.stop());
         audioStreamRef.current = null;
-        stopPresageCapture();
         setIsRecording(false);
         try {
           setTest3Status("Analyze phase: transcribing speech...");
@@ -869,9 +698,6 @@ const Assessment = () => {
           }));
           setRecallMetrics(computedRecall);
           setTest3Status("Analyze phase complete.");
-          if (facialSignalsStatus === "available" && faceMissingEventsRef.current === 0) {
-            setSessionQuality("good");
-          }
         } catch (error) {
           setTest3Error(error instanceof Error ? error.message : "Transcription failed.");
           setTest3Status("Analyze phase failed.");
@@ -889,9 +715,6 @@ const Assessment = () => {
           transcript: "",
         },
       }));
-      setFacialSignalsStatus("unavailable");
-      setSessionQuality("unavailable");
-      setSignalSource("unavailable");
       setTest3Phase("analyze");
       setTest3Error(error instanceof Error ? error.message : "Microphone access denied.");
       setTest3Status("Repeat phase skipped due to microphone denial.");
@@ -932,13 +755,16 @@ const Assessment = () => {
   };
 
   const buildAssessmentPayload = (): AssessmentAttemptPayload => {
-    const completedAtMs = Date.now();
-    flushActiveTestDuration(completedAtMs);
-    assessmentEndedAtRef.current = completedAtMs;
-
     const selected = assessmentData.test2.part1.selections;
-    const expected = assessmentData.test2.part1.objects.map((item) => item.label);
+    const expected: string[] = assessmentData.test2.part1.objects.map((item) =>
+      String(item.label),
+    );
     const correctSelections = selected.filter((label) => expected.includes(label)).length;
+    const transcriptResponseWords = assessmentData.test3.transcript
+      .split(/\s+/)
+      .map((word) => word.trim())
+      .filter(Boolean)
+      .slice(0, 5);
 
     const drawingCompleted = [1, 2, 3].filter(
       (task) => Boolean(assessmentData.test1Drawings[task]),
@@ -953,33 +779,42 @@ const Assessment = () => {
         ? recallMetrics
         : computeRecallMetrics(assessmentData.test3.promptWords, assessmentData.test3.transcript);
 
-    const finalMetrics =
-      presageMetrics ??
-      (presageSamplesRef.current.length
-        ? derivePresageMetrics(presageSamplesRef.current, startedAt)
-        : null);
-
-    const assessmentStartedAtMs = assessmentStartedAtRef.current;
-    const totalDurationSeconds = assessmentStartedAtMs
-      ? Math.max(0, (completedAtMs - assessmentStartedAtMs) / 1000)
-      : 0;
-
-    const timing = {
-      assessmentStartedAt: assessmentStartedAtMs
-        ? new Date(assessmentStartedAtMs).toISOString()
-        : null,
-      assessmentEndedAt: new Date(completedAtMs).toISOString(),
-      totalDurationSeconds: Number(totalDurationSeconds.toFixed(3)),
-      tests: {
-        test0Seconds: Number((testDurationsRef.current.test0Seconds || 0).toFixed(3)),
-        test1Seconds: Number((testDurationsRef.current.test1Seconds || 0).toFixed(3)),
-        test2Seconds: Number((testDurationsRef.current.test2Seconds || 0).toFixed(3)),
-        test3Seconds: Number((testDurationsRef.current.test3Seconds || 0).toFixed(3)),
-      },
-    };
-
     return {
       capturedAt: new Date().toISOString(),
+      tests: {
+        test0And4: {
+          randomWords: assessmentData.test0Words,
+          userInputs: assessmentData.test4.recalledWords,
+        },
+        test1: {
+          clockTimePrompt: clockInstructionTime,
+          drawings: {
+            step1: assessmentData.test1Drawings[1] ?? null,
+            step2: assessmentData.test1Drawings[2] ?? null,
+            step3: assessmentData.test1Drawings[3] ?? null,
+          },
+        },
+        test2: {
+          part1: {
+            randomPrompt: assessmentData.test2.part1.objects.map((item) => item.label),
+            userAnswer: assessmentData.test2.part1.selections,
+          },
+          part2: {
+            randomPrompt: equationText,
+            expectedAnswer: assessmentData.test2.part2.expectedAnswer,
+            userAnswer: assessmentData.test2.part2.answer,
+          },
+          part3: {
+            randomPrompt: assessmentData.test2.part3.targetSequence,
+            userAnswer: assessmentData.test2.part3.userSequence,
+          },
+        },
+        test3: {
+          chosenWords: assessmentData.test3.promptWords,
+          userResponses: transcriptResponseWords,
+          transcript: assessmentData.test3.transcript,
+        },
+      },
       memoryRecall: {
         score: Math.max(0, Math.min(correctSelections, expected.length)),
         maxScore: expected.length,
@@ -1008,48 +843,36 @@ const Assessment = () => {
         },
       },
       presage: {
-        facialSignalsStatus,
-        sessionQuality,
-        source: signalSource,
-        faceMissingEvents: faceMissingEventsRef.current,
-        faceMissingSeconds: Number(faceMissingSecondsRef.current.toFixed(2)),
-        metrics: finalMetrics,
-      },
-      timing,
-      testData: {
-        test0Words: assessmentData.test0Words,
-        test1Drawings: assessmentData.test1Drawings,
-        test2: {
-          part1: {
-            objects: assessmentData.test2.part1.objects,
-            options: assessmentData.test2.part1.options,
-            selections: assessmentData.test2.part1.selections,
-          },
-          part2: {
-            expectedAnswer: assessmentData.test2.part2.expectedAnswer,
-            answer: assessmentData.test2.part2.answer,
-          },
-          part3: {
-            targetSequence: assessmentData.test2.part3.targetSequence,
-            userSequence: assessmentData.test2.part3.userSequence,
-          },
-        },
-        test3: {
-          promptWords: assessmentData.test3.promptWords,
-          promptText: assessmentData.test3.promptText,
-          skipped: assessmentData.test3.skipped,
-          micPermission: assessmentData.test3.micPermission,
-        },
+        facialSignalsStatus: "unavailable",
+        sessionQuality: "unavailable",
+        source: "unavailable",
+        faceMissingEvents: 0,
+        faceMissingSeconds: 0,
+        metrics: null,
       },
     };
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleFinalSubmit = async () => {
+    if (step !== finalStep) return;
     setIsSubmitted(true);
     const payload = buildAssessmentPayload();
     await persistAssessmentAttempt(payload);
   };
+
+  if (isSubmitted) {
+    return (
+      <div className="min-h-screen bg-background px-4 py-14 text-foreground sm:px-6">
+        <div className="mx-auto max-w-3xl">
+          <Card className="border-border/70">
+            <CardContent className="flex min-h-64 items-center justify-center text-center">
+              <p className="text-xl font-medium">Thank you for completing the assessment.</p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background px-4 py-14 text-foreground sm:px-6">
@@ -1081,7 +904,7 @@ const Assessment = () => {
               <Progress value={progressValue} />
             </CardHeader>
             <CardContent>
-              <form className="space-y-5" onSubmit={handleSubmit}>
+              <form className="space-y-5" onSubmit={(event) => event.preventDefault()}>
                 {step === 0 && (
                   <div className="space-y-2 text-center">
                     <h2 className="font-display text-3xl font-semibold">Test 0: Word Recall</h2>
@@ -1124,6 +947,21 @@ const Assessment = () => {
                     {isFlashVisible ? (
                       <div className="rounded-lg border border-border/70 bg-card/60 p-6 text-center">
                         <p className="text-sm text-muted-foreground">Flashing for {flashCountdown}s</p>
+                        {step === 4 && (
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            Memorize the 3 objects in order, then select the matching 3 labels.
+                          </p>
+                        )}
+                        {step === 5 && (
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            Memorize the equation, then enter the final numeric answer.
+                          </p>
+                        )}
+                        {step === 6 && (
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            Memorize the 6-color sequence, then recreate it with the color buttons.
+                          </p>
+                        )}
                         {step === 4 && <p className="mt-3 text-4xl">{assessmentData.test2.part1.objects.map((x) => x.emoji).join(" ")}</p>}
                         {step === 5 && <p className="mt-3 text-4xl">{equationText}</p>}
                         {step === 6 && <p className="mt-3 text-4xl">{assessmentData.test2.part3.targetSequence.join(" ")}</p>}
@@ -1134,7 +972,12 @@ const Assessment = () => {
                           <div className="space-y-3">
                             <div className="flex flex-wrap gap-2">
                               {assessmentData.test2.part1.options.map((item) => (
-                                <Button key={item.label} type="button" variant="outline" onClick={() => addPart1Selection(item.label)}>
+                                <Button
+                                  key={item.label}
+                                  type="button"
+                                  variant={assessmentData.test2.part1.selections.includes(item.label) ? "default" : "outline"}
+                                  onClick={() => addPart1Selection(item.label)}
+                                >
                                   {item.label}
                                 </Button>
                               ))}
@@ -1142,6 +985,11 @@ const Assessment = () => {
                             <p className="text-sm text-muted-foreground">
                               Selected: {assessmentData.test2.part1.selections.join(", ")}
                             </p>
+                            <div className="flex justify-end">
+                              <Button type="button" variant="outline" onClick={clearPart1Selections}>
+                                Clear Selections
+                              </Button>
+                            </div>
                           </div>
                         )}
                         {step === 5 && (
@@ -1195,39 +1043,11 @@ const Assessment = () => {
                         </Badge>
                       ))}
                     </div>
-                    <div className="rounded-md border border-border/70 bg-card/60 p-3 text-center">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Target Words (Listen and repeat)
-                      </p>
-                      <p className="mt-2 text-lg font-medium text-foreground">
-                        {assessmentData.test3.promptWords.join(" ")}
-                      </p>
-                    </div>
                     <div className="flex items-center justify-center gap-2">
-                      <Badge
-                        variant="outline"
-                        className={
-                          sessionQuality === "good"
-                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                            : sessionQuality === "limited"
-                              ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                              : "border-rose-500/40 bg-rose-500/10 text-rose-300"
-                        }
-                      >
-                        Signal Quality: {sessionQuality}
-                      </Badge>
-                      <Badge variant="secondary" className="capitalize">
-                        {signalSource === "presage-sdk" ? "Presage SDK" : signalSource}
-                      </Badge>
                       <Badge variant="outline">
                         Timer: {repeatRemainingSeconds}s
                       </Badge>
                     </div>
-                    {faceMissingPrompt && (
-                      <p className="text-center text-sm text-amber-300">
-                        Please face camera. Test continues, but session quality is marked limited.
-                      </p>
-                    )}
                     {test3Error && (
                       <p className="text-center text-sm text-rose-300">
                         {test3Error}
@@ -1256,90 +1076,32 @@ const Assessment = () => {
                       </Button>
                     </div>
                     {test3Status && <p className="text-center text-sm text-muted-foreground">{test3Status}</p>}
-                    <div className="grid gap-2 rounded-md border border-border/70 bg-card/60 p-3 text-sm sm:grid-cols-3">
-                      <p className="text-muted-foreground">
-                        Facial status:{" "}
-                        <span className="font-medium text-foreground">{facialSignalsStatus}</span>
-                      </p>
-                      <p className="text-muted-foreground">
-                        Face-missing events:{" "}
-                        <span className="font-medium text-foreground">{faceMissingEvents}</span>
-                      </p>
-                      <p className="text-muted-foreground">
-                        Missing seconds:{" "}
-                        <span className="font-medium text-foreground">
-                          {faceMissingSeconds.toFixed(1)}
-                        </span>
-                      </p>
-                    </div>
-                    <video
-                      ref={presageVideoRef}
-                      autoPlay
-                      muted
-                      playsInline
-                      className="mx-auto h-28 w-44 rounded-md border border-border/60 bg-black/30 object-cover"
-                    />
                     <div className="space-y-2">
                       <Label>Captured Transcript</Label>
                       <Input value={assessmentData.test3.transcript} readOnly />
                     </div>
-                    <div className="grid gap-2 rounded-md border border-border/70 bg-card/60 p-3 text-xs text-muted-foreground sm:grid-cols-2">
-                      <p>
-                        Recall matched words:{" "}
-                        <span className="text-foreground">
-                          {recallMetrics.matchedCount} / {recallMetrics.totalTargetWords}
-                        </span>
-                      </p>
-                      <p>
-                        Recall accuracy:{" "}
-                        <span className="text-foreground">{(recallMetrics.accuracy * 100).toFixed(1)}%</span>
-                      </p>
-                      <p className="sm:col-span-2">
-                        Matched words:{" "}
-                        <span className="text-foreground">
-                          {recallMetrics.matchedWords.length
-                            ? recallMetrics.matchedWords.join(", ")
-                            : "None yet"}
-                        </span>
-                      </p>
-                    </div>
-                    {presageMetrics && (
-                      <div className="grid gap-2 rounded-md border border-border/70 bg-card/60 p-3 text-xs text-muted-foreground sm:grid-cols-2">
-                        <p>
-                          Engagement avg/min/max:{" "}
-                          <span className="text-foreground">
-                            {presageMetrics.engagement.avg} / {presageMetrics.engagement.min} /{" "}
-                            {presageMetrics.engagement.max}
-                          </span>
-                        </p>
-                        <p>
-                          Blink avg/min/max:{" "}
-                          <span className="text-foreground">
-                            {presageMetrics.blinkRate.avg} / {presageMetrics.blinkRate.min} /{" "}
-                            {presageMetrics.blinkRate.max}
-                          </span>
-                        </p>
-                        <p>
-                          Expression avg/min/max:{" "}
-                          <span className="text-foreground">
-                            {presageMetrics.expressionVariability.avg} /{" "}
-                            {presageMetrics.expressionVariability.min} /{" "}
-                            {presageMetrics.expressionVariability.max}
-                          </span>
-                        </p>
-                        <p>
-                          Face presence avg/min/max:{" "}
-                          <span className="text-foreground">
-                            {presageMetrics.facePresence.avg} / {presageMetrics.facePresence.min} /{" "}
-                            {presageMetrics.facePresence.max}
-                          </span>
-                        </p>
-                      </div>
-                    )}
                   </div>
                 )}
 
-                {isSubmitted && <p className="text-sm text-muted-foreground">Assessment submission captured.</p>}
+                {step === test4Step && (
+                  <div className="space-y-4">
+                    <h2 className="text-center font-display text-3xl font-semibold">Test 4: Word Recall Check</h2>
+                    <p className="text-center text-sm text-muted-foreground">
+                      Enter the 3 words shown at the beginning of Test 0.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {assessmentData.test4.recalledWords.map((word, index) => (
+                        <Input
+                          key={`test4-word-${index + 1}`}
+                          value={word}
+                          onChange={(event) => updateTest4Word(index, event.target.value)}
+                          placeholder={`Word ${index + 1}`}
+                          autoFocus={index === 0}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {saveStatus && <p className="text-sm text-muted-foreground">{saveStatus}</p>}
 
                 <div className="flex justify-end pt-2">
@@ -1348,7 +1110,7 @@ const Assessment = () => {
                       Next Section
                     </Button>
                   ) : (
-                    <Button type="submit">Submit Assessment</Button>
+                    <Button type="button" onClick={handleFinalSubmit}>Submit Assessment</Button>
                   )}
                 </div>
               </form>
