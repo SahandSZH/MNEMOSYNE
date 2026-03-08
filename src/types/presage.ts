@@ -49,6 +49,44 @@ export interface Stage3Timestamps {
   repeatEndedAt: string | null;
 }
 
+export interface AssessmentTiming {
+  assessmentStartedAt: string | null;
+  assessmentEndedAt: string | null;
+  totalDurationSeconds: number;
+  tests: {
+    test0Seconds: number;
+    test1Seconds: number;
+    test2Seconds: number;
+    test3Seconds: number;
+  };
+}
+
+export interface AssessmentTestData {
+  test0Words: string[];
+  test1Drawings: Record<number, string>;
+  test2: {
+    part1: {
+      objects: { emoji: string; label: string }[];
+      options: { emoji: string; label: string }[];
+      selections: string[];
+    };
+    part2: {
+      expectedAnswer: string | number;
+      answer: string;
+    };
+    part3: {
+      targetSequence: string[];
+      userSequence: string[];
+    };
+  };
+  test3: {
+    promptWords: string[];
+    promptText: string;
+    skipped: boolean;
+    micPermission: "unknown" | "granted" | "denied";
+  };
+}
+
 export interface AssessmentAttemptPayload {
   capturedAt: string;
   memoryRecall: {
@@ -76,6 +114,8 @@ export interface AssessmentAttemptPayload {
     faceMissingSeconds: number;
     metrics: PresageDerivedMetrics | null;
   };
+  timing: AssessmentTiming;
+  testData: AssessmentTestData;
 }
 
 export interface DashboardTrendPoint {

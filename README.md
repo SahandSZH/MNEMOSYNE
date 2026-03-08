@@ -93,6 +93,8 @@ Backend:
 cp server/.env.example server/.env
 ```
 
+Set `DATABASE_URL` in `server/.env` to your Neon PostgreSQL URL.
+
 ### Run frontend and backend
 
 ```sh
@@ -102,7 +104,7 @@ npm install
 # Install backend deps
 npm --prefix server install
 
-# Terminal 1: frontend (fixed port 5173)
+# Terminal 1: frontend (fixed port 8080)
 npm run dev
 
 # Terminal 2: backend API on port 8787
@@ -114,6 +116,10 @@ npm run dev:api
 - `GET /health` public
 - `GET /api/me` protected (JWT required)
 - `GET /api/doctor-only` protected + doctor role required
+- `POST /api/users/sync` protected (stores Auth0 user in PostgreSQL)
+- `POST /api/assessment-attempts` protected (stores full assessment + per-test metrics in PostgreSQL)
+- `GET /api/assessment-attempts/me` protected (current patient history)
+- `GET /api/doctor/dashboard` protected + doctor role required (dashboard summary from DB)
 
 ### Quick verification checklist
 

@@ -134,6 +134,15 @@ const getTestNumberForStep = (step: number) => {
   return 3;
 };
 
+type TestDurationKey = "test0Seconds" | "test1Seconds" | "test2Seconds" | "test3Seconds";
+
+const getDurationKeyForTest = (testNumber: number): TestDurationKey => {
+  if (testNumber <= 0) return "test0Seconds";
+  if (testNumber === 1) return "test1Seconds";
+  if (testNumber === 2) return "test2Seconds";
+  return "test3Seconds";
+};
+
 const blobToBase64 = async (blob: Blob) => {
   const buffer = await blob.arrayBuffer();
   let binary = "";
@@ -200,6 +209,16 @@ const Assessment = () => {
   const faceLastSeenAtRef = useRef<number | null>(null);
   const facePromptShownRef = useRef(false);
   const chunksRef = useRef<Blob[]>([]);
+  const assessmentStartedAtRef = useRef<number | null>(null);
+  const assessmentEndedAtRef = useRef<number | null>(null);
+  const activeTestNumberRef = useRef<number | null>(null);
+  const activeTestStartedAtRef = useRef<number | null>(null);
+  const testDurationsRef = useRef<Record<TestDurationKey, number>>({
+    test0Seconds: 0,
+    test1Seconds: 0,
+    test2Seconds: 0,
+    test3Seconds: 0,
+  });
   const initial = useRef(buildInitialData());
 
   const [step, setStep] = useState(0);
@@ -248,6 +267,50 @@ const Assessment = () => {
   const progressValue = useMemo(() => ((step + 1) / totalSteps) * 100, [step]);
   const currentTestNumber = useMemo(() => getTestNumberForStep(step), [step]);
   const nextTestNumber = useMemo(() => getTestNumberForStep(nextStep), [nextStep]);
+
+  const resetTimingState = () => {
+    assessmentStartedAtRef.current = null;
+    assessmentEndedAtRef.current = null;
+    activeTestNumberRef.current = null;
+    activeTestStartedAtRef.current = null;
+    testDurationsRef.current = {
+      test0Seconds: 0,
+      test1Seconds: 0,
+      test2Seconds: 0,
+      test3Seconds: 0,
+    };
+  };
+
+  const startAssessmentTiming = () => {
+    const now = Date.now();
+    assessmentStartedAtRef.current = now;
+    assessmentEndedAtRef.current = null;
+    activeTestNumberRef.current = null;
+    activeTestStartedAtRef.current = null;
+    testDurationsRef.current = {
+      test0Seconds: 0,
+      test1Seconds: 0,
+      test2Seconds: 0,
+      test3Seconds: 0,
+    };
+  };
+
+  const flushActiveTestDuration = (timestamp = Date.now()) => {
+    const activeTest = activeTestNumberRef.current;
+    const startedAt = activeTestStartedAtRef.current;
+    if (activeTest === null || startedAt === null) return;
+
+    const deltaSeconds = Math.max(0, (timestamp - startedAt) / 1000);
+    const key = getDurationKeyForTest(activeTest);
+    const previous = testDurationsRef.current[key] || 0;
+
+    testDurationsRef.current = {
+      ...testDurationsRef.current,
+      [key]: Number((previous + deltaSeconds).toFixed(3)),
+    };
+
+    activeTestStartedAtRef.current = timestamp;
+  };
 
   const getApiToken = async () => {
     try {
@@ -440,6 +503,8 @@ const Assessment = () => {
 
   useEffect(() => {
     return () => {
+      flushActiveTestDuration();
+      resetTimingState();
       stopPresageCapture();
       audioStreamRef.current?.getTracks().forEach((track) => track.stop());
       audioStreamRef.current = null;
@@ -451,6 +516,36 @@ const Assessment = () => {
       resetStage3Attempt();
     }
   }, [step]);
+
+  useEffect(() => {
+    if (!hasStarted) return;
+
+    if (isTransitioning) {
+      flushActiveTestDuration();
+      activeTestStartedAtRef.current = null;
+      return;
+    }
+
+    const now = Date.now();
+
+    if (activeTestNumberRef.current === null) {
+      activeTestNumberRef.current = currentTestNumber;
+      activeTestStartedAtRef.current = now;
+      return;
+    }
+
+    if (activeTestStartedAtRef.current === null) {
+      activeTestStartedAtRef.current = now;
+      activeTestNumberRef.current = currentTestNumber;
+      return;
+    }
+
+    if (activeTestNumberRef.current !== currentTestNumber) {
+      flushActiveTestDuration(now);
+      activeTestNumberRef.current = currentTestNumber;
+      activeTestStartedAtRef.current = now;
+    }
+  }, [currentTestNumber, hasStarted, isTransitioning]);
 
   useEffect(() => {
     if (!isRecording) return;
@@ -525,6 +620,9 @@ const Assessment = () => {
   }, [step]);
 
   const beginTransition = (targetStep: number) => {
+    if (targetStep === 0 && !assessmentStartedAtRef.current) {
+      startAssessmentTiming();
+    }
     setNextStep(targetStep);
     setCountdown(3);
     setIsTransitioning(true);
@@ -834,6 +932,10 @@ const Assessment = () => {
   };
 
   const buildAssessmentPayload = (): AssessmentAttemptPayload => {
+    const completedAtMs = Date.now();
+    flushActiveTestDuration(completedAtMs);
+    assessmentEndedAtRef.current = completedAtMs;
+
     const selected = assessmentData.test2.part1.selections;
     const expected = assessmentData.test2.part1.objects.map((item) => item.label);
     const correctSelections = selected.filter((label) => expected.includes(label)).length;
@@ -856,6 +958,25 @@ const Assessment = () => {
       (presageSamplesRef.current.length
         ? derivePresageMetrics(presageSamplesRef.current, startedAt)
         : null);
+
+    const assessmentStartedAtMs = assessmentStartedAtRef.current;
+    const totalDurationSeconds = assessmentStartedAtMs
+      ? Math.max(0, (completedAtMs - assessmentStartedAtMs) / 1000)
+      : 0;
+
+    const timing = {
+      assessmentStartedAt: assessmentStartedAtMs
+        ? new Date(assessmentStartedAtMs).toISOString()
+        : null,
+      assessmentEndedAt: new Date(completedAtMs).toISOString(),
+      totalDurationSeconds: Number(totalDurationSeconds.toFixed(3)),
+      tests: {
+        test0Seconds: Number((testDurationsRef.current.test0Seconds || 0).toFixed(3)),
+        test1Seconds: Number((testDurationsRef.current.test1Seconds || 0).toFixed(3)),
+        test2Seconds: Number((testDurationsRef.current.test2Seconds || 0).toFixed(3)),
+        test3Seconds: Number((testDurationsRef.current.test3Seconds || 0).toFixed(3)),
+      },
+    };
 
     return {
       capturedAt: new Date().toISOString(),
@@ -893,6 +1014,32 @@ const Assessment = () => {
         faceMissingEvents: faceMissingEventsRef.current,
         faceMissingSeconds: Number(faceMissingSecondsRef.current.toFixed(2)),
         metrics: finalMetrics,
+      },
+      timing,
+      testData: {
+        test0Words: assessmentData.test0Words,
+        test1Drawings: assessmentData.test1Drawings,
+        test2: {
+          part1: {
+            objects: assessmentData.test2.part1.objects,
+            options: assessmentData.test2.part1.options,
+            selections: assessmentData.test2.part1.selections,
+          },
+          part2: {
+            expectedAnswer: assessmentData.test2.part2.expectedAnswer,
+            answer: assessmentData.test2.part2.answer,
+          },
+          part3: {
+            targetSequence: assessmentData.test2.part3.targetSequence,
+            userSequence: assessmentData.test2.part3.userSequence,
+          },
+        },
+        test3: {
+          promptWords: assessmentData.test3.promptWords,
+          promptText: assessmentData.test3.promptText,
+          skipped: assessmentData.test3.skipped,
+          micPermission: assessmentData.test3.micPermission,
+        },
       },
     };
   };
