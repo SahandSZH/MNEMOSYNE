@@ -123,6 +123,15 @@ app.post("/api/assessment-attempts", checkJwt, async (req, res, next) => {
     };
 
     const savedAttempt = await saveAssessmentAttempt(attemptInput);
+    const savedAssessmentId = Number(savedAttempt?.assessmentId);
+    if (Number.isInteger(savedAssessmentId) && savedAssessmentId > 0) {
+      void scoreDrawingsForAssessment(savedAssessmentId).catch((error) => {
+        console.error(
+          `Auto drawing scoring failed for assessment ${savedAssessmentId}:`,
+          error instanceof Error ? error.message : error,
+        );
+      });
+    }
 
     const patientHistory = await getPatientAssessmentHistory(patientSub);
     const historyWithoutLatest = patientHistory.slice(0, -1);
