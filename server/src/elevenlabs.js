@@ -47,6 +47,9 @@ export function registerElevenLabsRoutes(app) {
           text,
           model_id: modelId,
           output_format: "mp3_44100_128",
+          voice_settings: {
+            speed: 0.7,
+          },
         }),
       });
 

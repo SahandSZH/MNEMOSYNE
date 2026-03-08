@@ -1,21 +1,34 @@
 import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 import { useNavigate } from "react-router-dom";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { calculateSpeechMetrics } from "@/lib/presageMetrics";
+import type { AssessmentAttemptPayload, RecallMetrics } from "@/types/presage";
 
-const totalSteps = 8;
+const totalSteps = 9;
 const finalStep = totalSteps - 1;
-const totalTests = 4;
+const totalTests = 5;
 
 const drawingStepStart = 1;
 const drawingStepEnd = 3;
 const test2StepStart = 4;
 const test2StepEnd = 6;
 const test3Step = 7;
+const test4Step = 8;
+const authAudience = import.meta.env.VITE_AUTH0_AUDIENCE || "https://mnemosyne-api";
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
+const configuredStage3RepeatSeconds =
+  Number(import.meta.env.VITE_STAGE3_REPEAT_SECONDS || 45) || 45;
+const stage3RepeatDurationSeconds = Math.max(
+  30,
+  Math.min(60, configuredStage3RepeatSeconds),
+);
 
 const drawingReferenceImages: Partial<Record<number, string>> = {
   2: "/Conjoined pentagons.png",
@@ -81,11 +94,35 @@ const makeEquation = () => {
 const makeRandomColorSequence = () =>
   Array.from({ length: 6 }, () => colorEmojiPool[randomInt(0, colorEmojiPool.length - 1)]);
 
+const normalizeWord = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const computeRecallMetrics = (targetWords: string[], transcript: string): RecallMetrics => {
+  const normalizedTargets = targetWords.map(normalizeWord).filter(Boolean);
+  const spokenWords = transcript
+    .split(/\s+/)
+    .map(normalizeWord)
+    .filter(Boolean);
+  const spokenSet = new Set(spokenWords);
+  const matchedWords = targetWords.filter((word) => spokenSet.has(normalizeWord(word)));
+  const matchedNormalized = new Set(matchedWords.map((word) => normalizeWord(word)));
+  const matchedCount = matchedNormalized.size;
+  const totalTargetWords = normalizedTargets.length;
+  const accuracy = totalTargetWords > 0 ? matchedCount / totalTargetWords : 0;
+
+  return {
+    matchedCount,
+    totalTargetWords,
+    accuracy: Number(accuracy.toFixed(3)),
+    matchedWords,
+  };
+};
+
 const getTestNumberForStep = (step: number) => {
   if (step === 0) return 0;
   if (step >= 1 && step <= 3) return 1;
   if (step >= 4 && step <= 6) return 2;
-  return 3;
+  if (step === 7) return 3;
+  return 4;
 };
 
 const blobToBase64 = async (blob: Blob) => {
@@ -96,6 +133,45 @@ const blobToBase64 = async (blob: Blob) => {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
+};
+
+const getApiErrorMessage = async (response: Response, fallback: string) => {
+  const text = await response.text();
+  const trimmed = text.trim();
+  if (!trimmed) return fallback;
+
+  try {
+    const parsed = JSON.parse(trimmed) as { error?: string; message?: string };
+    return parsed.error || parsed.message || trimmed;
+  } catch {
+    return trimmed;
+  }
+};
+
+const explainTtsFailure = (message: string) => {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("elevenlabs_api_key is missing")) {
+    return "Server missing ELEVENLABS_API_KEY in server/.env";
+  }
+  if (normalized.includes("failed to fetch") || normalized.includes("networkerror")) {
+    return "Cannot reach backend API. Ensure both frontend and API server are running.";
+  }
+  if (normalized.includes("401") || normalized.includes("403")) {
+    return "ElevenLabs key is invalid or lacks permission for this request.";
+  }
+  if (normalized.includes("429")) {
+    return "ElevenLabs rate limit or quota exceeded.";
+  }
+  if (normalized.includes("voice")) {
+    return "Voice ID may be invalid or unavailable.";
+  }
+  if (normalized.includes("model")) {
+    return "Model ID may be invalid or unavailable.";
+  }
+  if (normalized.includes("text is required")) {
+    return "Prompt text is empty.";
+  }
+  return message;
 };
 
 const buildInitialData = () => {
@@ -125,17 +201,24 @@ const buildInitialData = () => {
         skipped: false,
         micPermission: "unknown" as "unknown" | "granted" | "denied",
       },
+      test4: {
+        recalledWords: ["", "", ""] as string[],
+      },
     },
   };
 };
 
 const Assessment = () => {
   const navigate = useNavigate();
+  const { isAuthenticated, getAccessTokenSilently, getAccessTokenWithPopup } = useAuth0();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isDrawingRef = useRef(false);
   const flashIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const recordingStoppedAtRef = useRef<number | null>(null);
+  const listenPlayedAtRef = useRef<number | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const initial = useRef(buildInitialData());
 
@@ -145,13 +228,25 @@ const Assessment = () => {
   const [countdown, setCountdown] = useState(3);
   const [nextStep, setNextStep] = useState(0);
   const [isFlashVisible, setIsFlashVisible] = useState(false);
-  const [flashCountdown, setFlashCountdown] = useState(7);
+  const [flashCountdown, setFlashCountdown] = useState(10);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [equationText, setEquationText] = useState(initial.current.equationText);
   const [assessmentData, setAssessmentData] = useState(initial.current.data);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlayingPrompt, setIsPlayingPrompt] = useState(false);
   const [test3Status, setTest3Status] = useState("");
+  const [test3Error, setTest3Error] = useState("");
+  const [test3Phase, setTest3Phase] = useState<"listen" | "repeat" | "analyze">("listen");
+  const [repeatRemainingSeconds, setRepeatRemainingSeconds] = useState(
+    stage3RepeatDurationSeconds,
+  );
+  const [recallMetrics, setRecallMetrics] = useState<RecallMetrics>({
+    matchedCount: 0,
+    totalTargetWords: 0,
+    accuracy: 0,
+    matchedWords: [],
+  });
+  const [saveStatus, setSaveStatus] = useState("");
   const clockInstructionTime = useMemo(() => makeRandomClockTime(), []);
   const drawingInstructions = useMemo(
     () => ({
@@ -166,6 +261,87 @@ const Assessment = () => {
   const currentTestNumber = useMemo(() => getTestNumberForStep(step), [step]);
   const nextTestNumber = useMemo(() => getTestNumberForStep(nextStep), [nextStep]);
 
+  const getApiToken = async () => {
+    try {
+      return await getAccessTokenSilently({
+        authorizationParams: { audience: authAudience },
+      });
+    } catch (error) {
+      const code =
+        typeof error === "object" && error ? (error as { error?: string }).error : "";
+      if (code === "consent_required" || code === "login_required") {
+        return getAccessTokenWithPopup({
+          authorizationParams: { audience: authAudience },
+        });
+      }
+      throw error;
+    }
+  };
+
+  const resetStage3Attempt = () => {
+    mediaRecorderRef.current = null;
+    audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+    audioStreamRef.current = null;
+
+    setIsRecording(false);
+    setIsPlayingPrompt(false);
+    setTest3Status("");
+    setTest3Error("");
+    setTest3Phase("listen");
+    setRepeatRemainingSeconds(stage3RepeatDurationSeconds);
+    setRecallMetrics({
+      matchedCount: 0,
+      totalTargetWords: 0,
+      accuracy: 0,
+      matchedWords: [],
+    });
+
+    setSaveStatus("");
+
+    recordingStartedAtRef.current = null;
+    recordingStoppedAtRef.current = null;
+    listenPlayedAtRef.current = null;
+    chunksRef.current = [];
+
+    setAssessmentData((prev) => ({
+      ...prev,
+      test3: {
+        ...prev.test3,
+        transcript: "",
+        skipped: false,
+        micPermission: "unknown",
+      },
+    }));
+  };
+
+  const persistAssessmentAttempt = async (payload: AssessmentAttemptPayload) => {
+    if (!isAuthenticated) {
+      setSaveStatus("Saved locally. Sign in to sync this assessment to the backend.");
+      return;
+    }
+
+    try {
+      const accessToken = await getApiToken();
+      const response = await fetch(`${apiBaseUrl}/api/assessment-attempts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const body = await response.text();
+      if (!response.ok) {
+        throw new Error(body || "Assessment sync failed.");
+      }
+
+      setSaveStatus("Assessment synced to backend.");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Sync failed: ${error.message}` : "Sync failed.");
+    }
+  };
+
   useEffect(() => {
     const onBack = () => navigate("/", { replace: true });
     window.history.pushState({}, "", window.location.href);
@@ -174,12 +350,39 @@ const Assessment = () => {
   }, [navigate]);
 
   useEffect(() => {
+    return () => {
+      audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (step === test3Step) {
+      resetStage3Attempt();
+    }
+  }, [step]);
+
+  useEffect(() => {
+    if (!isRecording) return;
+    if (repeatRemainingSeconds <= 0) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setRepeatRemainingSeconds((value) => value - 1);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [isRecording, repeatRemainingSeconds]);
+
+  useEffect(() => {
     const loadWords = async () => {
       try {
         const response = await fetch("/test0vocab.txt", { cache: "no-store" });
         const text = await response.text();
         const list = text.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-        const test0Words = pickRandomWords(list, 5);
+        const test0Words = pickRandomWords(list, 3);
         const test3Words = pickRandomWords(list, 5);
         setAssessmentData((prev) => ({
           ...prev,
@@ -212,7 +415,7 @@ const Assessment = () => {
   useEffect(() => {
     if (step < test2StepStart || step > test2StepEnd) return;
     setIsFlashVisible(true);
-    setFlashCountdown(7);
+    setFlashCountdown(10);
     if (flashIntervalRef.current) clearInterval(flashIntervalRef.current);
     flashIntervalRef.current = setInterval(() => {
       setFlashCountdown((v) => {
@@ -384,38 +587,83 @@ const Assessment = () => {
     }));
   };
 
+  const updateTest4Word = (index: number, value: string) => {
+    setAssessmentData((prev) => {
+      const nextWords = [...prev.test4.recalledWords];
+      nextWords[index] = value;
+      return {
+        ...prev,
+        test4: {
+          ...prev.test4,
+          recalledWords: nextWords,
+        },
+      };
+    });
+  };
+
+  const clearPart1Selections = () => {
+    setAssessmentData((prev) => ({
+      ...prev,
+      test2: {
+        ...prev.test2,
+        part1: {
+          ...prev.test2.part1,
+          selections: [],
+        },
+      },
+    }));
+  };
+
   const playTest3Prompt = async () => {
     if (!assessmentData.test3.promptText) return;
     try {
+      setTest3Error("");
       setIsPlayingPrompt(true);
-      setTest3Status("Playing prompt...");
+      setTest3Phase("listen");
+      setTest3Status("Listen phase: playing target words...");
       const response = await fetch("/api/elevenlabs/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: assessmentData.test3.promptText }),
       });
-      if (!response.ok) throw new Error();
+      if (!response.ok) {
+        throw new Error(await getApiErrorMessage(response, "TTS request failed."));
+      }
       const payload = (await response.json()) as { audioBase64: string; mimeType: string };
       const audio = new Audio(`data:${payload.mimeType || "audio/mpeg"};base64,${payload.audioBase64}`);
       await audio.play();
-      setTest3Status("Prompt played.");
-    } catch {
-      setTest3Status("TTS failed.");
+      listenPlayedAtRef.current = Date.now();
+      setTest3Phase("repeat");
+      setTest3Status("Repeat phase ready. Start recording and repeat the words.");
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : "Unable to play prompt.";
+      const reason = explainTtsFailure(raw);
+      setTest3Error(`TTS request failed: ${reason}`);
+      setTest3Status(`Listen phase failed: ${reason}`);
     } finally {
       setIsPlayingPrompt(false);
     }
   };
 
   const startRecording = async () => {
+    setSaveStatus("");
+    setTest3Error("");
+    setRepeatRemainingSeconds(stage3RepeatDurationSeconds);
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
+      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = audioStream;
       setIsRecording(true);
+      setTest3Phase("repeat");
+      recordingStartedAtRef.current = Date.now();
+      recordingStoppedAtRef.current = null;
+      setTest3Status("Repeat phase: recording in progress.");
       setAssessmentData((prev) => ({
         ...prev,
         test3: { ...prev.test3, micPermission: "granted", skipped: false },
       }));
-      const recorder = new MediaRecorder(stream);
+
+      const recorder = new MediaRecorder(audioStream);
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
 
@@ -424,47 +672,59 @@ const Assessment = () => {
       };
 
       recorder.onstop = async () => {
+        recordingStoppedAtRef.current = Date.now();
+        setTest3Phase("analyze");
         const audioBlob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        stream.getTracks().forEach((t) => t.stop());
+        audioStream.getTracks().forEach((t) => t.stop());
+        audioStreamRef.current = null;
         setIsRecording(false);
         try {
-          setTest3Status("Transcribing...");
+          setTest3Status("Analyze phase: transcribing speech...");
           const audioBase64 = await blobToBase64(audioBlob);
           const response = await fetch("/api/elevenlabs/stt", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ audioBase64, mimeType: audioBlob.type || "audio/webm" }),
           });
-          if (!response.ok) throw new Error();
+          if (!response.ok) {
+            throw new Error(await getApiErrorMessage(response, "STT request failed."));
+          }
           const payload = (await response.json()) as { text: string };
+          const transcript = payload.text ?? "";
+          const computedRecall = computeRecallMetrics(assessmentData.test3.promptWords, transcript);
           setAssessmentData((prev) => ({
             ...prev,
-            test3: { ...prev.test3, transcript: payload.text ?? "" },
+            test3: { ...prev.test3, transcript },
           }));
-          setTest3Status("Transcription complete.");
-        } catch {
-          setTest3Status("STT failed.");
+          setRecallMetrics(computedRecall);
+          setTest3Status("Analyze phase complete.");
+        } catch (error) {
+          setTest3Error(error instanceof Error ? error.message : "Transcription failed.");
+          setTest3Status("Analyze phase failed.");
         }
       };
 
       recorder.start();
-    } catch {
+    } catch (error) {
       setAssessmentData((prev) => ({
         ...prev,
         test3: {
           ...prev.test3,
           micPermission: "denied",
           skipped: true,
-          transcript: prev.test3.promptText,
+          transcript: "",
         },
       }));
-      setTest3Status("Microphone denied. Test skipped.");
+      setTest3Phase("analyze");
+      setTest3Error(error instanceof Error ? error.message : "Microphone access denied.");
+      setTest3Status("Repeat phase skipped due to microphone denial.");
       setIsRecording(false);
     }
   };
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      setTest3Status("Analyze phase: processing recording...");
       mediaRecorderRef.current.stop();
     }
   };
@@ -494,10 +754,125 @@ const Assessment = () => {
     if (step < finalStep) setStep((v) => v + 1);
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsSubmitted(true);
+  const buildAssessmentPayload = (): AssessmentAttemptPayload => {
+    const selected = assessmentData.test2.part1.selections;
+    const expected: string[] = assessmentData.test2.part1.objects.map((item) =>
+      String(item.label),
+    );
+    const correctSelections = selected.filter((label) => expected.includes(label)).length;
+    const transcriptResponseWords = assessmentData.test3.transcript
+      .split(/\s+/)
+      .map((word) => word.trim())
+      .filter(Boolean)
+      .slice(0, 5);
+
+    const drawingCompleted = [1, 2, 3].filter(
+      (task) => Boolean(assessmentData.test1Drawings[task]),
+    ).length;
+
+    const startedAt = recordingStartedAtRef.current ?? Date.now();
+    const endedAt = recordingStoppedAtRef.current ?? Date.now();
+    const durationSeconds = Math.max(1, (endedAt - startedAt) / 1000);
+    const speech = calculateSpeechMetrics(assessmentData.test3.transcript, durationSeconds);
+    const finalRecall =
+      recallMetrics.totalTargetWords > 0
+        ? recallMetrics
+        : computeRecallMetrics(assessmentData.test3.promptWords, assessmentData.test3.transcript);
+
+    return {
+      capturedAt: new Date().toISOString(),
+      tests: {
+        test0And4: {
+          randomWords: assessmentData.test0Words,
+          userInputs: assessmentData.test4.recalledWords,
+        },
+        test1: {
+          clockTimePrompt: clockInstructionTime,
+          drawings: {
+            step1: assessmentData.test1Drawings[1] ?? null,
+            step2: assessmentData.test1Drawings[2] ?? null,
+            step3: assessmentData.test1Drawings[3] ?? null,
+          },
+        },
+        test2: {
+          part1: {
+            randomPrompt: assessmentData.test2.part1.objects.map((item) => item.label),
+            userAnswer: assessmentData.test2.part1.selections,
+          },
+          part2: {
+            randomPrompt: equationText,
+            expectedAnswer: assessmentData.test2.part2.expectedAnswer,
+            userAnswer: assessmentData.test2.part2.answer,
+          },
+          part3: {
+            randomPrompt: assessmentData.test2.part3.targetSequence,
+            userAnswer: assessmentData.test2.part3.userSequence,
+          },
+        },
+        test3: {
+          chosenWords: assessmentData.test3.promptWords,
+          userResponses: transcriptResponseWords,
+          transcript: assessmentData.test3.transcript,
+        },
+      },
+      memoryRecall: {
+        score: Math.max(0, Math.min(correctSelections, expected.length)),
+        maxScore: expected.length,
+      },
+      drawing: {
+        completedTasks: drawingCompleted,
+        totalTasks: 3,
+        clockTimePrompt: clockInstructionTime,
+      },
+      speech,
+      stage3: {
+        targetWords: assessmentData.test3.promptWords,
+        recall: finalRecall,
+        repeatDurationSeconds: stage3RepeatDurationSeconds,
+        phase: test3Phase,
+        timestamps: {
+          listenPlayedAt: listenPlayedAtRef.current
+            ? new Date(listenPlayedAtRef.current).toISOString()
+            : null,
+          repeatStartedAt: recordingStartedAtRef.current
+            ? new Date(recordingStartedAtRef.current).toISOString()
+            : null,
+          repeatEndedAt: recordingStoppedAtRef.current
+            ? new Date(recordingStoppedAtRef.current).toISOString()
+            : null,
+        },
+      },
+      presage: {
+        facialSignalsStatus: "unavailable",
+        sessionQuality: "unavailable",
+        source: "unavailable",
+        faceMissingEvents: 0,
+        faceMissingSeconds: 0,
+        metrics: null,
+      },
+    };
   };
+
+  const handleFinalSubmit = async () => {
+    if (step !== finalStep) return;
+    setIsSubmitted(true);
+    const payload = buildAssessmentPayload();
+    await persistAssessmentAttempt(payload);
+  };
+
+  if (isSubmitted) {
+    return (
+      <div className="min-h-screen bg-background px-4 py-14 text-foreground sm:px-6">
+        <div className="mx-auto max-w-3xl">
+          <Card className="border-border/70">
+            <CardContent className="flex min-h-64 items-center justify-center text-center">
+              <p className="text-xl font-medium">Thank you for completing the assessment.</p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background px-4 py-14 text-foreground sm:px-6">
@@ -529,7 +904,7 @@ const Assessment = () => {
               <Progress value={progressValue} />
             </CardHeader>
             <CardContent>
-              <form className="space-y-5" onSubmit={handleSubmit}>
+              <form className="space-y-5" onSubmit={(event) => event.preventDefault()}>
                 {step === 0 && (
                   <div className="space-y-2 text-center">
                     <h2 className="font-display text-3xl font-semibold">Test 0: Word Recall</h2>
@@ -572,6 +947,21 @@ const Assessment = () => {
                     {isFlashVisible ? (
                       <div className="rounded-lg border border-border/70 bg-card/60 p-6 text-center">
                         <p className="text-sm text-muted-foreground">Flashing for {flashCountdown}s</p>
+                        {step === 4 && (
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            Memorize the 3 objects in order, then select the matching 3 labels.
+                          </p>
+                        )}
+                        {step === 5 && (
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            Memorize the equation, then enter the final numeric answer.
+                          </p>
+                        )}
+                        {step === 6 && (
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            Memorize the 6-color sequence, then recreate it with the color buttons.
+                          </p>
+                        )}
                         {step === 4 && <p className="mt-3 text-4xl">{assessmentData.test2.part1.objects.map((x) => x.emoji).join(" ")}</p>}
                         {step === 5 && <p className="mt-3 text-4xl">{equationText}</p>}
                         {step === 6 && <p className="mt-3 text-4xl">{assessmentData.test2.part3.targetSequence.join(" ")}</p>}
@@ -582,7 +972,12 @@ const Assessment = () => {
                           <div className="space-y-3">
                             <div className="flex flex-wrap gap-2">
                               {assessmentData.test2.part1.options.map((item) => (
-                                <Button key={item.label} type="button" variant="outline" onClick={() => addPart1Selection(item.label)}>
+                                <Button
+                                  key={item.label}
+                                  type="button"
+                                  variant={assessmentData.test2.part1.selections.includes(item.label) ? "default" : "outline"}
+                                  onClick={() => addPart1Selection(item.label)}
+                                >
                                   {item.label}
                                 </Button>
                               ))}
@@ -590,6 +985,11 @@ const Assessment = () => {
                             <p className="text-sm text-muted-foreground">
                               Selected: {assessmentData.test2.part1.selections.join(", ")}
                             </p>
+                            <div className="flex justify-end">
+                              <Button type="button" variant="outline" onClick={clearPart1Selections}>
+                                Clear Selections
+                              </Button>
+                            </div>
                           </div>
                         )}
                         {step === 5 && (
@@ -627,19 +1027,53 @@ const Assessment = () => {
                 {step === test3Step && (
                   <div className="space-y-4">
                     <h2 className="text-center font-display text-3xl font-semibold">Test 3: Spoken Recall</h2>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      {(["listen", "repeat", "analyze"] as const).map((phase) => (
+                        <Badge
+                          key={phase}
+                          variant="outline"
+                          className={
+                            test3Phase === phase
+                              ? "border-primary/45 bg-primary/15 text-primary"
+                              : "border-border/70 bg-card/40 text-muted-foreground"
+                          }
+                        >
+                          {phase[0].toUpperCase()}
+                          {phase.slice(1)}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-center gap-2">
+                      <Badge variant="outline">
+                        Timer: {repeatRemainingSeconds}s
+                      </Badge>
+                    </div>
+                    {test3Error && (
+                      <p className="text-center text-sm text-rose-300">
+                        {test3Error}
+                      </p>
+                    )}
                     <div className="flex flex-wrap justify-center gap-2">
-                      <Button type="button" onClick={playTest3Prompt} disabled={isPlayingPrompt}>
-                        {isPlayingPrompt ? "Playing..." : "Play Phrase"}
+                      <Button type="button" onClick={playTest3Prompt} disabled={isPlayingPrompt || isRecording}>
+                        {isPlayingPrompt ? "Playing..." : "1. Listen"}
                       </Button>
                       {!isRecording ? (
-                        <Button type="button" variant="outline" onClick={startRecording}>
-                          Start Recording
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={startRecording}
+                          disabled={test3Phase !== "repeat" || isPlayingPrompt}
+                        >
+                          2. Start Repeat
                         </Button>
                       ) : (
                         <Button type="button" variant="destructive" onClick={stopRecording}>
-                          Stop Recording
+                          Stop and Analyze
                         </Button>
                       )}
+                      <Button type="button" variant="ghost" onClick={resetStage3Attempt} disabled={isRecording}>
+                        Retry
+                      </Button>
                     </div>
                     {test3Status && <p className="text-center text-sm text-muted-foreground">{test3Status}</p>}
                     <div className="space-y-2">
@@ -649,7 +1083,26 @@ const Assessment = () => {
                   </div>
                 )}
 
-                {isSubmitted && <p className="text-sm text-muted-foreground">Assessment captured locally.</p>}
+                {step === test4Step && (
+                  <div className="space-y-4">
+                    <h2 className="text-center font-display text-3xl font-semibold">Test 4: Word Recall Check</h2>
+                    <p className="text-center text-sm text-muted-foreground">
+                      Enter the 3 words shown at the beginning of Test 0.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {assessmentData.test4.recalledWords.map((word, index) => (
+                        <Input
+                          key={`test4-word-${index + 1}`}
+                          value={word}
+                          onChange={(event) => updateTest4Word(index, event.target.value)}
+                          placeholder={`Word ${index + 1}`}
+                          autoFocus={index === 0}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {saveStatus && <p className="text-sm text-muted-foreground">{saveStatus}</p>}
 
                 <div className="flex justify-end pt-2">
                   {step < finalStep ? (
@@ -657,7 +1110,7 @@ const Assessment = () => {
                       Next Section
                     </Button>
                   ) : (
-                    <Button type="submit">Submit Assessment</Button>
+                    <Button type="button" onClick={handleFinalSubmit}>Submit Assessment</Button>
                   )}
                 </div>
               </form>
