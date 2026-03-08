@@ -29,6 +29,11 @@ const formatMaybeNumber = (value: number | null, digits = 2) => {
   return value.toFixed(digits);
 };
 
+const formatMaybeDateTime = (value: string | null) => {
+  if (!value) return "N/A";
+  return formatDateTime(value);
+};
+
 const getFlagText = (risk: DoctorDashboardPatient["risk"], recallScore: number) => {
   if (risk === "High" || recallScore < 60) return "Review recommended";
   return "Routine follow-up";
@@ -62,6 +67,11 @@ const DoctorTestCatalog = ({ patient }: DoctorTestCatalogProps) => {
       label: "Drawing Exercise",
       value: `${latest.drawing.completedTasks}/${latest.drawing.totalTasks} (${formatPercent(latest.drawing.completionPercent)})`,
     },
+    { label: "Drawing 1 Score", value: formatMaybeNumber(latest.drawing.drawing1Score, 0) },
+    { label: "Drawing 2 Score", value: formatMaybeNumber(latest.drawing.drawing2Score, 0) },
+    { label: "Drawing 3 Score", value: formatMaybeNumber(latest.drawing.drawing3Score, 0) },
+    { label: "Drawing Scoring Status", value: latest.drawing.scoringStatus },
+    { label: "Drawing Scored At", value: formatMaybeDateTime(latest.drawing.scoredAt) },
     {
       label: "Memory Challenge",
       value: `Part 1: ${latest.memoryChallenge.part1Correct}/${latest.memoryChallenge.part1Total}, Part 3: ${latest.memoryChallenge.part3Correct}/${latest.memoryChallenge.part3Total}`,
@@ -83,6 +93,13 @@ const DoctorTestCatalog = ({ patient }: DoctorTestCatalogProps) => {
       value: `${latest.facial.sessionQuality} (${latest.facial.status})`,
     },
   ];
+
+  if (latest.drawing.scoringError) {
+    recentAttempt.push({
+      label: "Drawing Scoring Error",
+      value: latest.drawing.scoringError,
+    });
+  }
 
   const averageMetrics = [
     { label: "Avg Recall Accuracy", value: formatPercent(patient.aggregates.avgRecallAccuracyPercent) },
@@ -152,6 +169,7 @@ const DoctorTestCatalog = ({ patient }: DoctorTestCatalogProps) => {
           </div>
         </div>
 
+        {/*
         <div className="rounded-xl border border-border/70 bg-background/35 p-4">
           <p className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">AI Monitoring Summary</p>
           <p className="text-sm text-foreground">{patient.summary}</p>
@@ -184,7 +202,9 @@ const DoctorTestCatalog = ({ patient }: DoctorTestCatalogProps) => {
             </div>
           ) : null}
         </div>
+        */}
 
+        {/*
         <div className="rounded-xl border border-border/70 bg-background/35 p-4">
           <p className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">Facial Session Snapshot</p>
           <div className="grid gap-2 text-sm sm:grid-cols-2">
@@ -214,6 +234,7 @@ const DoctorTestCatalog = ({ patient }: DoctorTestCatalogProps) => {
             </div>
           </div>
         </div>
+        */}
 
         <div className="rounded-xl border border-border/70 bg-background/35 p-4">
           <p className="mb-3 text-xs uppercase tracking-wide text-muted-foreground">Data Coverage in Database</p>
@@ -251,6 +272,9 @@ const DoctorTestCatalog = ({ patient }: DoctorTestCatalogProps) => {
           </Badge>
           <Badge className="border border-cyan-500/30 bg-cyan-500/10 text-cyan-200">
             Session Quality: {latest.facial.sessionQuality}
+          </Badge>
+          <Badge className="border border-sky-500/30 bg-sky-500/10 text-sky-200">
+            Drawing Scoring: {latest.drawing.scoringStatus}
           </Badge>
           <Badge className="border border-amber-500/30 bg-amber-500/10 text-amber-200">
             Flag: {flagText}

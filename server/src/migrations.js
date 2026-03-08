@@ -44,8 +44,59 @@ const statements = [
       completed_tasks INTEGER NOT NULL DEFAULT 0,
       total_tasks INTEGER NOT NULL DEFAULT 0,
       completion_ratio NUMERIC(6, 3) NOT NULL DEFAULT 0,
-      duration_seconds NUMERIC(10, 3) NOT NULL DEFAULT 0
+      duration_seconds NUMERIC(10, 3) NOT NULL DEFAULT 0,
+      drawing_1_score NUMERIC(5, 2),
+      drawing_2_score NUMERIC(5, 2),
+      drawing_3_score NUMERIC(5, 2),
+      gemini_model TEXT,
+      scored_at TIMESTAMPTZ,
+      scoring_status TEXT NOT NULL DEFAULT 'pending',
+      scoring_error TEXT
     );`,
+  `ALTER TABLE test1_drawing_results
+    ADD COLUMN IF NOT EXISTS drawing_1_score NUMERIC(5, 2);`,
+  `ALTER TABLE test1_drawing_results
+    ADD COLUMN IF NOT EXISTS drawing_2_score NUMERIC(5, 2);`,
+  `ALTER TABLE test1_drawing_results
+    ADD COLUMN IF NOT EXISTS drawing_3_score NUMERIC(5, 2);`,
+  `ALTER TABLE test1_drawing_results
+    ADD COLUMN IF NOT EXISTS gemini_model TEXT;`,
+  `ALTER TABLE test1_drawing_results
+    ADD COLUMN IF NOT EXISTS scored_at TIMESTAMPTZ;`,
+  `ALTER TABLE test1_drawing_results
+    ADD COLUMN IF NOT EXISTS scoring_status TEXT NOT NULL DEFAULT 'pending';`,
+  `ALTER TABLE test1_drawing_results
+    ADD COLUMN IF NOT EXISTS scoring_error TEXT;`,
+  `DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_test1_drawing_results_score_range'
+      ) THEN
+        ALTER TABLE test1_drawing_results
+          ADD CONSTRAINT chk_test1_drawing_results_score_range
+          CHECK (
+            (drawing_1_score IS NULL OR (drawing_1_score >= 0 AND drawing_1_score <= 100))
+            AND (drawing_2_score IS NULL OR (drawing_2_score >= 0 AND drawing_2_score <= 100))
+            AND (drawing_3_score IS NULL OR (drawing_3_score >= 0 AND drawing_3_score <= 100))
+          );
+      END IF;
+    END
+  $$;`,
+  `DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_test1_drawing_results_scoring_status'
+      ) THEN
+        ALTER TABLE test1_drawing_results
+          ADD CONSTRAINT chk_test1_drawing_results_scoring_status
+          CHECK (scoring_status IN ('pending', 'success', 'fallback', 'error'));
+      END IF;
+    END
+  $$;`,
   `CREATE TABLE IF NOT EXISTS test2_memory_challenge_results (
       assessment_id BIGINT PRIMARY KEY REFERENCES assessments(id) ON DELETE CASCADE,
       part1_random_prompt_json JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -155,6 +206,8 @@ const statements = [
     ON test0_test4_results(assessment_id);`,
   `CREATE INDEX IF NOT EXISTS idx_test1_drawing_results_assessment
     ON test1_drawing_results(assessment_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_test1_drawing_results_scored_at
+    ON test1_drawing_results(scored_at DESC);`,
   `CREATE INDEX IF NOT EXISTS idx_test2_memory_results_assessment
     ON test2_memory_challenge_results(assessment_id);`,
   `CREATE INDEX IF NOT EXISTS idx_test3_spoken_results_assessment

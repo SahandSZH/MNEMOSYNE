@@ -7,6 +7,12 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(number) ? number : fallback;
 };
 
+const toNumberOrNull = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const round = (value, digits = 1) => {
@@ -238,6 +244,13 @@ const mapRowToMetrics = (row, trendIndex) => {
     drawingTotal > 0
       ? clamp(drawingCompleted / drawingTotal, 0, 1)
       : clamp(toNumber(row.drawing_completion_ratio, 0), 0, 1);
+  const drawing1Score = toNumberOrNull(row.drawing_1_score);
+  const drawing2Score = toNumberOrNull(row.drawing_2_score);
+  const drawing3Score = toNumberOrNull(row.drawing_3_score);
+  const drawingScoringStatus = String(row.drawing_scoring_status || "pending");
+  const drawingScoredAt = toIsoOrNull(row.drawing_scored_at);
+  const drawingScoringErrorRaw = String(row.drawing_scoring_error || "").trim();
+  const drawingScoringError = drawingScoringErrorRaw || null;
 
   const speechWordCount = toNumber(row.speech_word_count, 0);
   const speechRateWpm = toNumber(row.speech_rate_wpm, 0);
@@ -325,6 +338,17 @@ const mapRowToMetrics = (row, trendIndex) => {
       totalTasks: drawingTotal,
       completionPercent: toPercent(drawingCompletionRatio, 1),
       durationSeconds: round(toNumber(row.drawing_duration_seconds, 0), 2),
+      drawing1Score,
+      drawing2Score,
+      drawing3Score,
+      scoringStatus: drawingScoringStatus,
+      scoredAt: drawingScoredAt,
+      scoringError: drawingScoringError,
+      drawing_1_score: drawing1Score,
+      drawing_2_score: drawing2Score,
+      drawing_3_score: drawing3Score,
+      scoring_status: drawingScoringStatus,
+      scored_at: drawingScoredAt,
     },
     speech: {
       wordCount: speechWordCount,
@@ -682,6 +706,12 @@ export async function getDoctorDashboardData() {
         COALESCE(dr.total_tasks, 0) AS drawing_total_tasks,
         COALESCE(dr.completion_ratio, 0) AS drawing_completion_ratio,
         COALESCE(dr.duration_seconds, 0) AS drawing_duration_seconds,
+        t1r.drawing_1_score AS drawing_1_score,
+        t1r.drawing_2_score AS drawing_2_score,
+        t1r.drawing_3_score AS drawing_3_score,
+        COALESCE(t1r.scoring_status, 'pending') AS drawing_scoring_status,
+        t1r.scored_at AS drawing_scored_at,
+        t1r.scoring_error AS drawing_scoring_error,
 
         COALESCE(sr.word_count, 0) AS speech_word_count,
         COALESCE(sr.speech_rate_wpm, 0) AS speech_rate_wpm,
@@ -714,6 +744,7 @@ export async function getDoctorDashboardData() {
       LEFT JOIN memory_recall_results mr ON mr.assessment_id = a.id
       LEFT JOIN memory_challenge_results mc ON mc.assessment_id = a.id
       LEFT JOIN drawing_results dr ON dr.assessment_id = a.id
+      LEFT JOIN test1_drawing_results t1r ON t1r.assessment_id = a.id
       LEFT JOIN speech_results sr ON sr.assessment_id = a.id
       LEFT JOIN facial_metrics fm ON fm.assessment_id = a.id
       ORDER BY a.captured_at ASC
