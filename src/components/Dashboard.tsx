@@ -340,9 +340,39 @@ const Dashboard = () => {
           <p className="mb-4 text-sm text-muted-foreground">
             {doctorData?.latestSummary || "No AI summary available yet."}
           </p>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Source: {doctorData?.summarySource || "heuristic"}
+          </p>
           <p className="mb-3 text-xs text-muted-foreground">
             Confidence: {doctorData?.latestSummaryConfidence ?? 0}
           </p>
+          {Boolean(doctorData?.summaryError) && (
+            <p className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-2 text-xs text-amber-200">
+              {doctorData?.summaryError}
+            </p>
+          )}
+
+          {Boolean(doctorData?.possibleDeclineSignals?.length) && (
+            <div className="mb-4">
+              <h4 className="mb-2 text-sm font-semibold text-foreground">Possible Decline Signals</h4>
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                {(doctorData?.possibleDeclineSignals || []).slice(0, 4).map((item, index) => (
+                  <li key={`decline-signal-${index}`}>• {item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {Boolean(doctorData?.contributingFactors?.length) && (
+            <div className="mb-4">
+              <h4 className="mb-2 text-sm font-semibold text-foreground">Contributing Factors</h4>
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                {(doctorData?.contributingFactors || []).slice(0, 4).map((item, index) => (
+                  <li key={`contributing-factor-${index}`}>• {item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <h4 className="mb-2 text-sm font-semibold text-foreground">Contributing Signals</h4>
           <div className="space-y-2">

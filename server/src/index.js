@@ -6,9 +6,12 @@ import { buildAiSummary, buildDoctorDashboardData, buildGeminiInputContract } fr
 import { config } from "./config.js";
 import { healthCheckDatabase } from "./db.js";
 import { registerElevenLabsRoutes } from "./elevenlabs.js";
+import { generateGeminiMonitoringReport } from "./geminiService.js";
 import {
+  backfillAssessmentDerivedTables,
   getAllAssessmentAttempts,
   getPatientAssessmentHistory,
+  saveAssessmentAiReport,
   saveAssessmentAttempt,
   syncAuth0UserProfile,
 } from "./assessmentStore.js";
@@ -122,14 +125,31 @@ app.post("/api/assessment-attempts", checkJwt, async (req, res, next) => {
 
     const patientHistory = await getPatientAssessmentHistory(patientSub);
     const historyWithoutLatest = patientHistory.slice(0, -1);
-    const aiSummary = buildAiSummary(savedAttempt, historyWithoutLatest);
+    const heuristicSummary = buildAiSummary(savedAttempt, historyWithoutLatest);
     const geminiInputContract = buildGeminiInputContract(savedAttempt, historyWithoutLatest);
+    const geminiReport = await generateGeminiMonitoringReport({
+      geminiInputContract,
+      fallbackSummary: heuristicSummary,
+    });
+
+    await saveAssessmentAiReport(savedAttempt.attemptId, geminiReport);
+
+    const aiSummary = {
+      summaryText: geminiReport.clinicalSummary,
+      summaryConfidence: geminiReport.confidence,
+      contributingSignals: heuristicSummary.contributingSignals,
+      possibleDeclineSignals: geminiReport.possibleDeclineSignals,
+      contributingFactors: geminiReport.contributingFactors,
+      source: geminiReport.source,
+      error: geminiReport.error,
+    };
 
     return res.status(201).json({
       saved: true,
       attemptId: savedAttempt.attemptId || savedAttempt.id,
       aiSummary,
       geminiInputContract,
+      aiReport: geminiReport,
     });
   } catch (error) {
     return next(error);
@@ -168,6 +188,10 @@ app.use((err, _req, res, _next) => {
 
 async function startServer() {
   await runMigrations();
+  const { backfilledCount } = await backfillAssessmentDerivedTables();
+  if (backfilledCount > 0) {
+    console.log(`Backfilled ${backfilledCount} assessment(s) into derived test tables.`);
+  }
 
   app.listen(config.port, () => {
     console.log(`API server running at http://localhost:${config.port}`);

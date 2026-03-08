@@ -89,6 +89,40 @@ export interface AssessmentTestData {
 
 export interface AssessmentAttemptPayload {
   capturedAt: string;
+  tests: {
+    test0And4: {
+      randomWords: string[];
+      userInputs: string[];
+    };
+    test1: {
+      clockTimePrompt: string;
+      drawings: {
+        step1: string | null;
+        step2: string | null;
+        step3: string | null;
+      };
+    };
+    test2: {
+      part1: {
+        randomPrompt: string[];
+        userAnswer: string[];
+      };
+      part2: {
+        randomPrompt: string;
+        expectedAnswer: number | string;
+        userAnswer: string;
+      };
+      part3: {
+        randomPrompt: string[];
+        userAnswer: string[];
+      };
+    };
+    test3: {
+      chosenWords: string[];
+      userResponses: string[];
+      transcript: string;
+    };
+  };
   memoryRecall: {
     score: number;
     maxScore: number;
@@ -143,4 +177,8 @@ export interface DoctorDashboardData {
   contributingSignals: ContributingSignal[];
   latestSummary: string;
   latestSummaryConfidence: number;
+  summarySource?: string;
+  summaryError?: string | null;
+  possibleDeclineSignals?: string[];
+  contributingFactors?: string[];
 }
