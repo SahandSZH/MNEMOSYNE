@@ -6,6 +6,7 @@ import { buildAiSummary, buildGeminiInputContract } from "./dashboardAnalysis.js
 import { config } from "./config.js";
 import { healthCheckDatabase } from "./db.js";
 import { getDoctorDashboardData } from "./doctorDashboardStore.js";
+import { scoreDrawingsForAssessment } from "./drawingScoringService.js";
 import { registerElevenLabsRoutes } from "./elevenlabs.js";
 import { generateGeminiMonitoringReport } from "./geminiService.js";
 import {
@@ -171,6 +172,17 @@ app.get("/api/doctor/dashboard", checkJwt, requireDoctor, async (_req, res, next
   try {
     const dashboard = await getDoctorDashboardData();
     return res.json(dashboard);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/api/assessment/:id/score-drawings", checkJwt, requireDoctor, async (req, res, next) => {
+  try {
+    const result = await scoreDrawingsForAssessment(req.params.id);
+    const statusCode =
+      result.scoringStatus === "success" ? 200 : result.scoringStatus === "fallback" ? 200 : 502;
+    return res.status(statusCode).json(result);
   } catch (error) {
     return next(error);
   }

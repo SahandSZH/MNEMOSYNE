@@ -209,6 +209,17 @@ export interface DoctorDashboardLatestDrawing {
   totalTasks: number;
   completionPercent: number;
   durationSeconds: number;
+  drawing1Score: number | null;
+  drawing2Score: number | null;
+  drawing3Score: number | null;
+  scoringStatus: "pending" | "success" | "fallback" | "error";
+  scoredAt: string | null;
+  scoringError: string | null;
+  drawing_1_score: number | null;
+  drawing_2_score: number | null;
+  drawing_3_score: number | null;
+  scoring_status: "pending" | "success" | "fallback" | "error";
+  scored_at: string | null;
 }
 
 export interface DoctorDashboardLatestSpeech {
