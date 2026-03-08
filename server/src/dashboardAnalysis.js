@@ -20,6 +20,14 @@ const average = (values) => {
   return values.reduce((acc, value) => acc + value, 0) / values.length;
 };
 
+const toTrimmedText = (value) => {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+};
+
+const isDataUrlImage = (value) =>
+  /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(toTrimmedText(value));
+
 function getSignalAverage(attempt, signalKey) {
   return toNumber(attempt?.presage?.metrics?.[signalKey]?.avg, 0);
 }
@@ -78,6 +86,9 @@ function getPersistedAiReport(attempt) {
     contributingFactors: Array.isArray(report.contributingFactors)
       ? report.contributingFactors.map((item) => String(item)).filter(Boolean)
       : [],
+    drawingQualityScore: clamp(toNumber(report.drawingQualityScore, 0), 0, 100),
+    drawingQualityNotes:
+      typeof report.drawingQualityNotes === "string" ? report.drawingQualityNotes : "",
     error: typeof report.error === "string" ? report.error : null,
   };
 }
@@ -86,10 +97,46 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function extractDrawingImageDataUrls(attempt) {
+  const fromTests = attempt?.tests?.test1?.drawings || {};
+  const fromLegacy = attempt?.testData?.test1Drawings || {};
+
+  const step1 = toTrimmedText(fromTests?.step1 || fromLegacy?.[1] || fromLegacy?.step1);
+  const step2 = toTrimmedText(fromTests?.step2 || fromLegacy?.[2] || fromLegacy?.step2);
+  const step3 = toTrimmedText(fromTests?.step3 || fromLegacy?.[3] || fromLegacy?.step3);
+
+  const entries = [
+    { step: "step1", label: "clock drawing", dataUrl: step1 },
+    { step: "step2", label: "conjoined pentagons copy", dataUrl: step2 },
+    { step: "step3", label: "cube copy", dataUrl: step3 },
+  ];
+
+  return entries.map((entry) => ({
+    ...entry,
+    dataUrl: isDataUrlImage(entry.dataUrl) ? entry.dataUrl : null,
+  }));
+}
+
+export function extractDrawingImagesForGemini(attempt) {
+  return extractDrawingImageDataUrls(attempt).filter((entry) => Boolean(entry.dataUrl));
+}
+
 export function buildGeminiInputContract(latestAttempt, history) {
+  const drawingImages = extractDrawingImageDataUrls(latestAttempt);
+  const availableDrawingSteps = drawingImages.filter((entry) => entry.dataUrl).map((entry) => entry.step);
+
   return {
     memoryScore: latestAttempt.memoryRecall,
     drawingScore: latestAttempt.drawing,
+    drawingContext: {
+      clockTimePrompt:
+        toTrimmedText(latestAttempt?.tests?.test1?.clockTimePrompt) ||
+        toTrimmedText(latestAttempt?.drawing?.clockTimePrompt),
+      availableDrawingSteps,
+      completedTasks: toNumber(latestAttempt?.drawing?.completedTasks, 0),
+      totalTasks: toNumber(latestAttempt?.drawing?.totalTasks, 0),
+      completionRatio: toNumber(latestAttempt?.drawing?.completionRatio, 0),
+    },
     speechMetrics: latestAttempt.speech,
     presageMetrics: latestAttempt.presage,
     historicalTrendData: history.map((attempt) => ({
@@ -161,6 +208,9 @@ export function buildDoctorDashboardData(allAttempts) {
     summaryError: persistedAiReport?.error || null,
     possibleDeclineSignals: persistedAiReport?.possibleDeclineSignals || [],
     contributingFactors: persistedAiReport?.contributingFactors || [],
+    drawingQualityScore: persistedAiReport?.drawingQualityScore ?? 0,
+    drawingQualityNotes:
+      persistedAiReport?.drawingQualityNotes || "Drawing quality score unavailable.",
     geminiInputContract: buildGeminiInputContract(latestAttempt, historyWithoutLatest),
   };
 }

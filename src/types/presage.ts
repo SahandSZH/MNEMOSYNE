@@ -209,6 +209,9 @@ export interface DoctorDashboardLatestDrawing {
   totalTasks: number;
   completionPercent: number;
   durationSeconds: number;
+  step1ImageDataUrl: string | null;
+  step2ImageDataUrl: string | null;
+  step3ImageDataUrl: string | null;
 }
 
 export interface DoctorDashboardLatestSpeech {
@@ -295,6 +298,8 @@ export interface DoctorDashboardPatient {
   summaryError: string | null;
   possibleDeclineSignals: string[];
   contributingFactors: string[];
+  drawingQualityScore: number | null;
+  drawingQualityNotes: string;
   latestAssessment: DoctorDashboardLatestAssessment;
   aggregates: DoctorDashboardPatientAggregates;
   dataCoverage: DoctorDashboardDataCoverage;

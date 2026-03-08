@@ -76,6 +76,14 @@ const readPersistedAiReport = (payload) => {
   if (!clinicalSummary) return null;
 
   const confidence = clamp(toNumber(report.confidence, 0), 0, 1);
+  const drawingQualityScoreRaw = toNumber(report.drawingQualityScore, Number.NaN);
+  const drawingQualityScore = Number.isFinite(drawingQualityScoreRaw)
+    ? round(clamp(drawingQualityScoreRaw, 0, 100), 1)
+    : null;
+  const drawingQualityNotes =
+    typeof report.drawingQualityNotes === "string" && report.drawingQualityNotes.trim()
+      ? report.drawingQualityNotes.trim()
+      : null;
 
   return {
     clinicalSummary,
@@ -94,6 +102,8 @@ const readPersistedAiReport = (payload) => {
     contributingFactors: Array.isArray(report.contributingFactors)
       ? report.contributingFactors.map((item) => String(item)).filter(Boolean)
       : [],
+    drawingQualityScore,
+    drawingQualityNotes,
   };
 };
 
@@ -207,6 +217,36 @@ const hasMetricData = ({ score, total, accuracy, extra = [] }) => {
   return extra.some((value) => toNumber(value, 0) > 0);
 };
 
+const extractBase64Length = (value) => {
+  if (typeof value !== "string") return 0;
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  const commaIndex = trimmed.indexOf(",");
+  if (commaIndex < 0) return trimmed.length;
+  return Math.max(0, trimmed.length - commaIndex - 1);
+};
+
+const estimateDrawingScoreFromDataUrls = (drawing) => {
+  if (!drawing || typeof drawing !== "object") return null;
+  const completedTasks = toNumber(drawing.completedTasks, 0);
+  const totalTasks = toNumber(drawing.totalTasks, 0);
+  const completionRatio =
+    totalTasks > 0 ? clamp(completedTasks / totalTasks, 0, 1) : 0;
+
+  const imageLengths = [
+    extractBase64Length(drawing.step1ImageDataUrl),
+    extractBase64Length(drawing.step2ImageDataUrl),
+    extractBase64Length(drawing.step3ImageDataUrl),
+  ].filter((value) => value > 0);
+
+  if (!imageLengths.length) return null;
+
+  const averageLength = average(imageLengths);
+  const complexity = clamp((averageLength - 4000) / (120000 - 4000), 0, 1);
+  const score = clamp(completionRatio * 0.4 + complexity * 0.6, 0, 1) * 100;
+  return round(score, 1);
+};
+
 const mapRowToMetrics = (row, trendIndex) => {
   const capturedAt = toIsoOrNull(row.captured_at);
   const submittedAt = toIsoOrNull(row.submitted_at);
@@ -262,6 +302,31 @@ const mapRowToMetrics = (row, trendIndex) => {
   const sessionQuality = String(row.session_quality || "unavailable");
   const facialSignalsStatus = String(row.facial_signals_status || "unknown");
   const aiReport = readPersistedAiReport(row.attempt_payload);
+  const payloadDrawings = row?.attempt_payload?.tests?.test1?.drawings || {};
+  const step1ImageDataUrl =
+    typeof row.test1_step1_image_data_url === "string"
+      ? row.test1_step1_image_data_url
+      : typeof payloadDrawings.step1 === "string"
+        ? payloadDrawings.step1
+        : null;
+  const step2ImageDataUrl =
+    typeof row.test1_step2_image_data_url === "string"
+      ? row.test1_step2_image_data_url
+      : typeof payloadDrawings.step2 === "string"
+        ? payloadDrawings.step2
+        : null;
+  const step3ImageDataUrl =
+    typeof row.test1_step3_image_data_url === "string"
+      ? row.test1_step3_image_data_url
+      : typeof payloadDrawings.step3 === "string"
+        ? payloadDrawings.step3
+        : null;
+  const normalizedStep1ImageDataUrl =
+    typeof step1ImageDataUrl === "string" && step1ImageDataUrl.trim() ? step1ImageDataUrl.trim() : null;
+  const normalizedStep2ImageDataUrl =
+    typeof step2ImageDataUrl === "string" && step2ImageDataUrl.trim() ? step2ImageDataUrl.trim() : null;
+  const normalizedStep3ImageDataUrl =
+    typeof step3ImageDataUrl === "string" && step3ImageDataUrl.trim() ? step3ImageDataUrl.trim() : null;
 
   return {
     assessmentId: toNumber(row.assessment_id, trendIndex + 1),
@@ -325,6 +390,9 @@ const mapRowToMetrics = (row, trendIndex) => {
       totalTasks: drawingTotal,
       completionPercent: toPercent(drawingCompletionRatio, 1),
       durationSeconds: round(toNumber(row.drawing_duration_seconds, 0), 2),
+      step1ImageDataUrl: normalizedStep1ImageDataUrl,
+      step2ImageDataUrl: normalizedStep2ImageDataUrl,
+      step3ImageDataUrl: normalizedStep3ImageDataUrl,
     },
     speech: {
       wordCount: speechWordCount,
@@ -494,6 +562,11 @@ const rowsToDashboard = (rows) => {
       2,
     );
     const persistedAiReport = latestDetail.aiReport;
+    const fallbackDrawingScore = estimateDrawingScoreFromDataUrls(latestDetail?.drawing);
+    const fallbackDrawingNotes =
+      fallbackDrawingScore === null
+        ? "Drawing quality score is unavailable until Gemini image scoring succeeds."
+        : "Drawing quality score is estimated from drawing stroke density and completion while Gemini is unavailable.";
 
     patients.push({
       id: patientKey,
@@ -526,6 +599,11 @@ const rowsToDashboard = (rows) => {
       summaryError: persistedAiReport?.error || null,
       possibleDeclineSignals: persistedAiReport?.possibleDeclineSignals || [],
       contributingFactors: persistedAiReport?.contributingFactors || [],
+      drawingQualityScore:
+        typeof persistedAiReport?.drawingQualityScore === "number"
+          ? persistedAiReport.drawingQualityScore
+          : fallbackDrawingScore,
+      drawingQualityNotes: persistedAiReport?.drawingQualityNotes || fallbackDrawingNotes,
       latestAssessment: {
         assessmentId: latestDetail.assessmentId,
         capturedAt: latestDetail.capturedAt,
@@ -682,6 +760,9 @@ export async function getDoctorDashboardData() {
         COALESCE(dr.total_tasks, 0) AS drawing_total_tasks,
         COALESCE(dr.completion_ratio, 0) AS drawing_completion_ratio,
         COALESCE(dr.duration_seconds, 0) AS drawing_duration_seconds,
+        t1.step1_image_data_url AS test1_step1_image_data_url,
+        t1.step2_image_data_url AS test1_step2_image_data_url,
+        t1.step3_image_data_url AS test1_step3_image_data_url,
 
         COALESCE(sr.word_count, 0) AS speech_word_count,
         COALESCE(sr.speech_rate_wpm, 0) AS speech_rate_wpm,
@@ -714,6 +795,7 @@ export async function getDoctorDashboardData() {
       LEFT JOIN memory_recall_results mr ON mr.assessment_id = a.id
       LEFT JOIN memory_challenge_results mc ON mc.assessment_id = a.id
       LEFT JOIN drawing_results dr ON dr.assessment_id = a.id
+      LEFT JOIN test1_drawing_results t1 ON t1.assessment_id = a.id
       LEFT JOIN speech_results sr ON sr.assessment_id = a.id
       LEFT JOIN facial_metrics fm ON fm.assessment_id = a.id
       ORDER BY a.captured_at ASC

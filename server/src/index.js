@@ -2,7 +2,11 @@ import cors from "cors";
 import express from "express";
 
 import { checkJwt, getRoles, requireDoctor } from "./auth.js";
-import { buildAiSummary, buildGeminiInputContract } from "./dashboardAnalysis.js";
+import {
+  buildAiSummary,
+  buildGeminiInputContract,
+  extractDrawingImagesForGemini,
+} from "./dashboardAnalysis.js";
 import { config } from "./config.js";
 import { healthCheckDatabase } from "./db.js";
 import { getDoctorDashboardData } from "./doctorDashboardStore.js";
@@ -127,9 +131,11 @@ app.post("/api/assessment-attempts", checkJwt, async (req, res, next) => {
     const historyWithoutLatest = patientHistory.slice(0, -1);
     const heuristicSummary = buildAiSummary(savedAttempt, historyWithoutLatest);
     const geminiInputContract = buildGeminiInputContract(savedAttempt, historyWithoutLatest);
+    const drawingImages = extractDrawingImagesForGemini(savedAttempt);
     const geminiReport = await generateGeminiMonitoringReport({
       geminiInputContract,
       fallbackSummary: heuristicSummary,
+      drawingImages,
     });
 
     await saveAssessmentAiReport(savedAttempt.attemptId, geminiReport);
@@ -140,6 +146,8 @@ app.post("/api/assessment-attempts", checkJwt, async (req, res, next) => {
       contributingSignals: heuristicSummary.contributingSignals,
       possibleDeclineSignals: geminiReport.possibleDeclineSignals,
       contributingFactors: geminiReport.contributingFactors,
+      drawingQualityScore: geminiReport.drawingQualityScore,
+      drawingQualityNotes: geminiReport.drawingQualityNotes,
       source: geminiReport.source,
       error: geminiReport.error,
     };
