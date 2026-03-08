@@ -73,6 +73,7 @@ export interface AssessmentTestData {
     part2: {
       expectedAnswer: string | number;
       answer: string;
+      isCorrect: boolean | null;
     };
     part3: {
       targetSequence: string[];
@@ -89,6 +90,41 @@ export interface AssessmentTestData {
 
 export interface AssessmentAttemptPayload {
   capturedAt: string;
+  tests: {
+    test0And4: {
+      randomWords: string[];
+      userInputs: string[];
+    };
+    test1: {
+      clockTimePrompt: string;
+      drawings: {
+        step1: string | null;
+        step2: string | null;
+        step3: string | null;
+      };
+    };
+    test2: {
+      part1: {
+        randomPrompt: string[];
+        userAnswer: string[];
+      };
+      part2: {
+        randomPrompt: string;
+        expectedAnswer: string | number;
+        userAnswer: string;
+        isCorrect: boolean | null;
+      };
+      part3: {
+        randomPrompt: string[];
+        userAnswer: string[];
+      };
+    };
+    test3: {
+      chosenWords: string[];
+      userResponses: string[];
+      transcript: string;
+    };
+  };
   memoryRecall: {
     score: number;
     maxScore: number;
