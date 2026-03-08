@@ -1,4 +1,5 @@
 {
+  /* No-op metadata note: settings intentionally unchanged. */
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2023"],
