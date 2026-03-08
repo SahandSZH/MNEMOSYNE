@@ -221,6 +221,20 @@ const Assessment = () => {
   const listenPlayedAtRef = useRef<number | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const initial = useRef(buildInitialData());
+  
+  // Timing refs for each test
+  const assessmentStartedAtRef = useRef<number | null>(null);
+  const assessmentEndedAtRef = useRef<number | null>(null);
+  const test0StartRef = useRef<number | null>(null);
+  const test0EndRef = useRef<number | null>(null);
+  const test1StartRef = useRef<number | null>(null);
+  const test1EndRef = useRef<number | null>(null);
+  const test2StartRef = useRef<number | null>(null);
+  const test2EndRef = useRef<number | null>(null);
+  const test3StartRef = useRef<number | null>(null);
+  const test3EndRef = useRef<number | null>(null);
+  const test4StartRef = useRef<number | null>(null);
+  const test4EndRef = useRef<number | null>(null);
 
   const [step, setStep] = useState(0);
   const [hasStarted, setHasStarted] = useState(false);
@@ -435,6 +449,35 @@ const Assessment = () => {
   }, [step]);
 
   const beginTransition = (targetStep: number) => {
+    const now = Date.now();
+    
+    // Track assessment start
+    if (!assessmentStartedAtRef.current && targetStep > 0) {
+      assessmentStartedAtRef.current = now;
+    }
+    
+    // Track test endings and beginnings
+    const currentTestNum = getTestNumberForStep(step);
+    const nextTestNum = getTestNumberForStep(targetStep);
+    
+    // End previous test
+    if (currentTestNum !== nextTestNum && step > 0) {
+      if (currentTestNum === 0 && !test0EndRef.current) test0EndRef.current = now;
+      if (currentTestNum === 1 && !test1EndRef.current) test1EndRef.current = now;
+      if (currentTestNum === 2 && !test2EndRef.current) test2EndRef.current = now;
+      if (currentTestNum === 3 && !test3EndRef.current) test3EndRef.current = now;
+      if (currentTestNum === 4 && !test4EndRef.current) test4EndRef.current = now;
+    }
+    
+    // Start new test
+    if (targetStep > 0) {
+      if (nextTestNum === 0 && !test0StartRef.current) test0StartRef.current = now;
+      if (nextTestNum === 1 && !test1StartRef.current) test1StartRef.current = now;
+      if (nextTestNum === 2 && !test2StartRef.current) test2StartRef.current = now;
+      if (nextTestNum === 3 && !test3StartRef.current) test3StartRef.current = now;
+      if (nextTestNum === 4 && !test4StartRef.current) test4StartRef.current = now;
+    }
+    
     setNextStep(targetStep);
     setCountdown(3);
     setIsTransitioning(true);
@@ -769,15 +812,58 @@ const Assessment = () => {
     const drawingCompleted = [1, 2, 3].filter(
       (task) => Boolean(assessmentData.test1Drawings[task]),
     ).length;
+    const drawingCompletionRatio = drawingCompleted / 3;
 
-    const startedAt = recordingStartedAtRef.current ?? Date.now();
-    const endedAt = recordingStoppedAtRef.current ?? Date.now();
-    const durationSeconds = Math.max(1, (endedAt - startedAt) / 1000);
-    const speech = calculateSpeechMetrics(assessmentData.test3.transcript, durationSeconds);
+    const recordingStartedAt = recordingStartedAtRef.current ?? Date.now();
+    const recordingStoppedAt = recordingStoppedAtRef.current ?? Date.now();
+    const test3DurationSeconds = Math.max(1, (recordingStoppedAt - recordingStartedAt) / 1000);
+    const speech = calculateSpeechMetrics(assessmentData.test3.transcript, test3DurationSeconds);
     const finalRecall =
       recallMetrics.totalTargetWords > 0
         ? recallMetrics
         : computeRecallMetrics(assessmentData.test3.promptWords, assessmentData.test3.transcript);
+
+    // Calculate timing for each test
+    const now = Date.now();
+    const assessmentStart = assessmentStartedAtRef.current ?? now;
+    const assessmentEnd = assessmentEndedAtRef.current ?? now;
+    const totalDurationSeconds = Math.max(0, Math.round((assessmentEnd - assessmentStart) / 1000));
+
+    const test0Start = test0StartRef.current ?? assessmentStart;
+    const test0End = test0EndRef.current ?? now;
+    const test0Seconds = Math.max(0, Math.round((test0End - test0Start) / 1000));
+
+    const test1Start = test1StartRef.current ?? assessmentStart;
+    const test1End = test1EndRef.current ?? now;
+    const test1Seconds = Math.max(0, Math.round((test1End - test1Start) / 1000));
+
+    const test2Start = test2StartRef.current ?? assessmentStart;
+    const test2End = test2EndRef.current ?? now;
+    const test2Seconds = Math.max(0, Math.round((test2End - test2Start) / 1000));
+
+    const test3Start = test3StartRef.current ?? assessmentStart;
+    const test3End = test3EndRef.current ?? now;
+    const test3Seconds = Math.max(0, Math.round((test3End - test3Start) / 1000));
+
+    // Compute stats unique to test2 (memory challenge)
+    const test2Part2ExpectedAnswer = String(assessmentData.test2.part2.expectedAnswer).trim();
+    const test2Part2UserAnswer = assessmentData.test2.part2.answer.trim();
+    const test2Part2IsCorrect = test2Part2ExpectedAnswer && test2Part2UserAnswer 
+      ? test2Part2ExpectedAnswer === test2Part2UserAnswer 
+      : null;
+
+    const test2Part3TargetSequence = assessmentData.test2.part3.targetSequence.map(v => String(v));
+    const test2Part3UserSequence = assessmentData.test2.part3.userSequence.map(v => String(v));
+    const test2Part3CorrectCount = Math.min(test2Part3TargetSequence.length, test2Part3UserSequence.length);
+    let matchingIndices = 0;
+    for (let i = 0; i < test2Part3CorrectCount; i += 1) {
+      if (test2Part3TargetSequence[i] === test2Part3UserSequence[i]) {
+        matchingIndices += 1;
+      }
+    }
+
+    // Compute memory recall accuracy
+    const memoryAccuracy = expected.length > 0 ? correctSelections / expected.length : 0;
 
     return {
       capturedAt: new Date().toISOString(),
@@ -801,8 +887,9 @@ const Assessment = () => {
           },
           part2: {
             randomPrompt: equationText,
-            expectedAnswer: assessmentData.test2.part2.expectedAnswer,
-            userAnswer: assessmentData.test2.part2.answer,
+            expectedAnswer: test2Part2ExpectedAnswer,
+            userAnswer: test2Part2UserAnswer,
+            isCorrect: test2Part2IsCorrect,
           },
           part3: {
             randomPrompt: assessmentData.test2.part3.targetSequence,
@@ -850,11 +937,49 @@ const Assessment = () => {
         faceMissingSeconds: 0,
         metrics: null,
       },
+      timing: {
+        assessmentStartedAt: assessmentStart ? new Date(assessmentStart).toISOString() : null,
+        assessmentEndedAt: assessmentEnd ? new Date(assessmentEnd).toISOString() : null,
+        totalDurationSeconds,
+        tests: {
+          test0Seconds,
+          test1Seconds,
+          test2Seconds,
+          test3Seconds: Math.round(test3DurationSeconds),
+        },
+      },
+      testData: {
+        test0Words: assessmentData.test0Words,
+        test1Drawings: assessmentData.test1Drawings,
+        test2: {
+          part1: {
+            objects: assessmentData.test2.part1.objects,
+            options: assessmentData.test2.part1.options,
+            selections: assessmentData.test2.part1.selections,
+          },
+          part2: {
+            expectedAnswer: test2Part2ExpectedAnswer,
+            answer: test2Part2UserAnswer,
+            isCorrect: test2Part2IsCorrect,
+          },
+          part3: {
+            targetSequence: assessmentData.test2.part3.targetSequence,
+            userSequence: assessmentData.test2.part3.userSequence,
+          },
+        },
+        test3: {
+          promptWords: assessmentData.test3.promptWords,
+          promptText: assessmentData.test3.promptText,
+          skipped: assessmentData.test3.skipped,
+          micPermission: assessmentData.test3.micPermission,
+        },
+      },
     };
   };
 
   const handleFinalSubmit = async () => {
     if (step !== finalStep) return;
+    assessmentEndedAtRef.current = Date.now();
     setIsSubmitted(true);
     const payload = buildAssessmentPayload();
     await persistAssessmentAttempt(payload);
